@@ -64,29 +64,20 @@ st.set_page_config(
     layout="wide"
 )
 # =========================
-# LOGIN
+# LOGIN COM GOOGLE
 # =========================
 
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if not st.session_state.logado:
+if not st.user.is_logged_in:
     st.title("Acesso ao sistema")
+    st.write("Entre com sua conta Google para acessar.")
 
-    usuario_digitado = st.text_input("Usuário")
-    senha_digitada = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        if (
-            usuario_digitado == st.secrets["auth"]["usuario"]
-            and senha_digitada == st.secrets["auth"]["senha"]
-        ):
-            st.session_state.logado = True
-            st.rerun()
-        else:
-            st.error("Usuário ou senha incorretos.")
+    if st.button("🔐 Entrar com Google"):
+        st.login()
 
     st.stop()
+
+st.markdown("""
+<style>
 st.markdown("""
 <style>
 
@@ -471,8 +462,7 @@ for opcao in opcoes_menu:
 st.sidebar.divider()
 
 if st.sidebar.button("🚪 Sair", use_container_width=True):
-    st.session_state.logado = False
-    st.rerun()
+    st.logout()
 
 menu = st.session_state.menu_ativo
 if menu == "🏠 Início":
