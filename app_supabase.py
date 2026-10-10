@@ -4,6 +4,8 @@ import ssl
 import tomllib
 from pathlib import Path
 from PIL import Image
+from datetime import date, datetime, timedelta
+import unicodedata
 
 # Pasta onde está o app_supabase.py
 PASTA_APP = Path(__file__).resolve().parent
@@ -369,8 +371,68 @@ st.sidebar.markdown(
     """,
     unsafe_allow_html=True
 )
+def obter_dias_semana(texto_dias):
+    if not texto_dias:
+        return []
 
-# =========================
+    texto = unicodedata.normalize(
+        "NFKD", texto_dias
+    ).encode(
+        "ASCII", "ignore"
+    ).decode().lower()
+
+    mapa = {
+        "segunda": 0,
+        "seg": 0,
+        "terca": 1,
+        "ter": 1,
+        "quarta": 2,
+        "qua": 2,
+        "quinta": 3,
+        "qui": 3,
+        "sexta": 4,
+        "sex": 4,
+        "sabado": 5,
+        "sab": 5,
+        "domingo": 6,
+        "dom": 6
+    }
+
+    dias_encontrados = set()
+
+    for nome, numero in mapa.items():
+        if nome in texto:
+            dias_encontrados.add(numero)
+
+    return sorted(dias_encontrados)
+
+
+def calcular_data_renovacao(
+    data_inicio,
+    texto_dias,
+    quantidade_aulas,
+    dias_sem_aula
+):
+    dias_turma = obter_dias_semana(texto_dias)
+
+    if not dias_turma:
+        return None
+
+    data_atual = data_inicio
+    aulas_contadas = 0
+
+    while True:
+
+        if (
+            data_atual.weekday() in dias_turma
+            and data_atual not in dias_sem_aula
+        ):
+            aulas_contadas += 1
+
+            if aulas_contadas > quantidade_aulas:
+                return data_atual
+
+        data_atual += timedelta(days=1)# =========================
 # MENU LATERAL COM BOTÕES
 # =========================
 
@@ -387,6 +449,7 @@ opcoes_menu = [
     "💸 Despesas",
     "🔄 Reposições",
     "👨‍🏫 Instrutores",
+    "📆 Dias sem aula",
     "📊 Relatórios"
 ]
 
@@ -405,6 +468,11 @@ for opcao in opcoes_menu:
     ):
         st.session_state.menu_ativo = opcao
         st.rerun()
+st.sidebar.divider()
+
+if st.sidebar.button("🚪 Sair", use_container_width=True):
+    st.session_state.logado = False
+    st.rerun()
 
 menu = st.session_state.menu_ativo
 if menu == "🏠 Início":
@@ -483,7 +551,164 @@ if menu == "🏠 Início":
     """)
 
     total_turmas = cursor.fetchone()[0] or 0
+    # =========================
+    # ALERTAS DE RENOVAÇÃO
+    # =========================
 
+    cursor.execute("""
+        SELECT DISTINCT ON (alunos.id)
+            alunos.id,
+            alunos.nome,
+            turmas.dias,
+            financeiro.data_pagamento,
+            financeiro.plano
+        FROM alunos
+        INNER JOIN financeiro
+            ON financeiro.aluno_id = alunos.id
+        LEFT JOIN turmas
+            ON alunos.turma_id = turmas.id
+        WHERE financeiro.status = 'Pago'
+          AND financeiro.data_pagamento IS NOT NULL
+          AND financeiro.plano IN ('8 aulas', '24 aulas')
+        ORDER BY
+            alunos.id,
+            financeiro.data_pagamento DESC,
+            financeiro.id DESC
+    """)
+
+    dados_renovacoes = cursor.fetchall()
+
+    # Dias em que o estúdio estará fechado
+    cursor.execute("""
+        SELECT data
+        FROM dias_sem_aula
+    """)
+
+    dias_sem_aula_banco = cursor.fetchall()
+
+    dias_sem_aula_inicio = set()
+
+    for dia in dias_sem_aula_banco:
+        dias_sem_aula_inicio.add(
+            datetime.strptime(
+                dia[0],
+                "%Y-%m-%d"
+            ).date()
+        )
+
+    renovacoes_atrasadas = []
+    renovacoes_hoje = []
+    renovacoes_proximas = []
+
+    for registro in dados_renovacoes:
+        aluno_nome = registro[1]
+        dias_turma = registro[2]
+        data_pagamento_aluno = registro[3]
+        plano_aluno = registro[4]
+
+        if not dias_turma:
+            continue
+
+        data_inicio_ciclo = datetime.strptime(
+            data_pagamento_aluno,
+            "%Y-%m-%d"
+        ).date()
+
+        if plano_aluno == "8 aulas":
+            quantidade_aulas = 8
+        else:
+            quantidade_aulas = 24
+
+        data_prevista = calcular_data_renovacao(
+            data_inicio_ciclo,
+            dias_turma,
+            quantidade_aulas,
+            dias_sem_aula_inicio
+        )
+
+        if data_prevista:
+            diferenca = (data_prevista - hoje).days
+
+            if diferenca < 0:
+                renovacoes_atrasadas.append(
+                    (
+                        aluno_nome,
+                        data_prevista,
+                        abs(diferenca)
+                    )
+                )
+
+            elif diferenca == 0:
+                renovacoes_hoje.append(
+                    (
+                        aluno_nome,
+                        data_prevista
+                    )
+                )
+
+            elif diferenca <= 7:
+                renovacoes_proximas.append(
+                    (
+                        aluno_nome,
+                        data_prevista,
+                        diferenca
+                    )
+                )
+
+    st.divider()
+    st.subheader("🔔 Renovações")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "🔴 Atrasadas",
+        len(renovacoes_atrasadas)
+    )
+
+    col2.metric(
+        "📅 Hoje",
+        len(renovacoes_hoje)
+    )
+
+    col3.metric(
+        "⚠️ Próximos 7 dias",
+        len(renovacoes_proximas)
+    )
+
+    total_alertas = (
+        len(renovacoes_atrasadas)
+        + len(renovacoes_hoje)
+        + len(renovacoes_proximas)
+    )
+
+    if total_alertas == 0:
+        st.success(
+            "Nenhuma renovação prevista para os próximos 7 dias."
+        )
+    if total_alertas == 0:
+        st.success(
+            "Nenhuma renovação prevista para os próximos 7 dias."
+        )
+
+    for nome, data_renovacao, dias_atraso in renovacoes_atrasadas:
+        st.error(
+            f"🔴 {nome} — renovação prevista para "
+            f"{data_renovacao.strftime('%d/%m/%Y')} "
+            f"({dias_atraso} dia(s) em atraso)"
+        )
+
+    for nome, data_renovacao in renovacoes_hoje:
+        st.error(
+            f"🔴 {nome} — RENOVAÇÃO HOJE "
+            f"({data_renovacao.strftime('%d/%m/%Y')})"
+        )
+
+    for nome, data_renovacao, dias_restantes in renovacoes_proximas:
+        st.warning(
+            f"⚠️ {nome} — renovação em "
+            f"{dias_restantes} dia(s): "
+            f"{data_renovacao.strftime('%d/%m/%Y')}"
+        )
     # =========================
     # PILATES
     # =========================
@@ -1752,6 +1977,71 @@ elif menu == "💰 Financeiro":
                 key="financeiro_data"
             )
 
+            # =========================
+            # PREVISÃO DE RENOVAÇÃO
+            # =========================
+
+            cursor.execute("""
+                SELECT turmas.dias
+                FROM alunos
+                LEFT JOIN turmas
+                    ON alunos.turma_id = turmas.id
+                WHERE alunos.id = ?
+            """, (
+                aluno_id_financeiro,
+            ))
+
+            resultado_turma = cursor.fetchone()
+
+            if resultado_turma:
+                dias_turma_aluno = resultado_turma[0]
+            else:
+                dias_turma_aluno = None
+
+            cursor.execute("""
+                SELECT data
+                FROM dias_sem_aula
+            """)
+
+            dias_fechados_banco = cursor.fetchall()
+
+            dias_fechados = set()
+
+            for dia in dias_fechados_banco:
+                dias_fechados.add(
+                    datetime.strptime(
+                        dia[0],
+                        "%Y-%m-%d"
+                    ).date()
+                )
+
+            if plano == "8 aulas":
+                quantidade_aulas_plano = 8
+            else:
+                quantidade_aulas_plano = 24
+
+            data_renovacao = calcular_data_renovacao(
+                data_pagamento,
+                dias_turma_aluno,
+                quantidade_aulas_plano,
+                dias_fechados
+            )
+
+            if data_renovacao:
+                st.success(
+                    f"📅 Renovação prevista: "
+                    f"{data_renovacao.strftime('%d/%m/%Y')}"
+                )
+            else:
+                st.warning(
+                    "Não foi possível calcular a renovação. "
+                    "Confira se o aluno está vinculado a uma turma."
+                )
+
+            # =========================
+            # VALORES DO PLANO
+            # =========================
+
             data_reajuste = date(2027, 1, 1)
 
             if data_pagamento >= data_reajuste:
@@ -1864,7 +2154,6 @@ elif menu == "💰 Financeiro":
                 st.success(
                     "Pagamento salvo com sucesso!"
                 )
-
     # =========================
     # ABA 2 - RESUMO / HISTÓRICO
     # =========================
@@ -3313,6 +3602,85 @@ elif menu == "👨‍🏫 Instrutores":
                 "Total geral dos instrutores",
                 f"R$ {total_geral_instrutores:.2f}"
             )
+elif menu == "📆 Dias sem aula":
+    st.title("Dias sem aula")
+
+    aba_cadastrar, aba_lista = st.tabs(
+        ["➕ Cadastrar", "📋 Dias cadastrados"]
+    )
+
+    with aba_cadastrar:
+        st.subheader("Cadastrar dia sem aula")
+
+        data_sem_aula = st.date_input(
+            "Data"
+        )
+
+        motivo = st.text_input(
+            "Motivo",
+            placeholder="Ex.: Feriado"
+        )
+
+        observacao = st.text_area(
+            "Observação",
+            placeholder="Ex.: Estúdio estará fechado."
+        )
+
+        if st.button("Salvar dia sem aula"):
+            cursor.execute(
+                """
+                INSERT INTO dias_sem_aula
+                (data, motivo, observacao)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    str(data_sem_aula),
+                    motivo,
+                    observacao
+                )
+            )
+
+            conn.commit()
+
+            st.success("Dia sem aula cadastrado com sucesso!")
+            st.rerun()
+
+    with aba_lista:
+        cursor.execute(
+            """
+            SELECT id, data, motivo, observacao
+            FROM dias_sem_aula
+            ORDER BY data
+            """
+        )
+
+        dias = cursor.fetchall()
+
+        if not dias:
+            st.info("Nenhum dia sem aula cadastrado.")
+        else:
+            for dia in dias:
+                st.write(
+                    f"📅 {dia[1]} | "
+                    f"{dia[2] or 'Sem motivo informado'}"
+                )
+
+                if dia[3]:
+                    st.caption(dia[3])
+
+                if st.button(
+                    "🗑️ Excluir",
+                    key=f"excluir_dia_{dia[0]}"
+                ):
+                    cursor.execute(
+                        "DELETE FROM dias_sem_aula WHERE id = ?",
+                        (dia[0],)
+                    )
+                    conn.commit()
+                    st.rerun()
+
+                st.divider()
+
 elif menu == "📊 Relatórios":
     st.title("Relatórios")
 
