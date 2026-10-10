@@ -64,25 +64,35 @@ st.set_page_config(
     layout="wide"
 )
 # =========================
-# LOGIN COM GOOGLE
+# LOGIN
 # =========================
 
-if not st.user.is_logged_in:
-    st.title("Acesso ao sistema")
-    st.write("Entre com sua conta Google para acessar.")
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
-    if st.button("🔐 Entrar com Google"):
-        st.login()
+if not st.session_state.logado:
+    st.title("Acesso ao sistema")
+
+    usuario_digitado = st.text_input("Usuário")
+    senha_digitada = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        if (
+            usuario_digitado == st.secrets["auth"]["usuario"]
+            and senha_digitada == st.secrets["auth"]["senha"]
+        ):
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Usuário ou senha incorretos.")
 
     st.stop()
-
 st.markdown("""
 <style>
 
 /* =========================
    MENU LATERAL
    ========================= */
-
 [data-testid="stSidebar"] {
     background: linear-gradient(
         180deg,
@@ -458,9 +468,6 @@ for opcao in opcoes_menu:
         st.session_state.menu_ativo = opcao
         st.rerun()
 st.sidebar.divider()
-
-if st.sidebar.button("🚪 Sair", use_container_width=True):
-    st.logout()
 
 menu = st.session_state.menu_ativo
 if menu == "🏠 Início":
