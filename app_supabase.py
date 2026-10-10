@@ -78,8 +78,6 @@ if not st.user.is_logged_in:
 
 st.markdown("""
 <style>
-st.markdown("""
-<style>
 
 /* =========================
    MENU LATERAL
