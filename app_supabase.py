@@ -55,12 +55,36 @@ class CursorCompat:
 
 
 cursor = CursorCompat(conn.cursor())
+
 st.set_page_config(
     page_title="Studio de Pilates",
     page_icon="🧘",
     layout="wide"
 )
+# =========================
+# LOGIN
+# =========================
 
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if not st.session_state.logado:
+    st.title("Acesso ao sistema")
+
+    usuario_digitado = st.text_input("Usuário")
+    senha_digitada = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        if (
+            usuario_digitado == st.secrets["auth"]["usuario"]
+            and senha_digitada == st.secrets["auth"]["senha"]
+        ):
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Usuário ou senha incorretos.")
+
+    st.stop()
 st.markdown("""
 <style>
 
