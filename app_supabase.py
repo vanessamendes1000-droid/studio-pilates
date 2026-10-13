@@ -824,48 +824,6 @@ if menu == "🏠 Início":
     )
 
     # =========================
-    # FINANCEIRO
-    # =========================
-
-    st.subheader("Financeiro do mês")
-
-    col5, col6, col7 = st.columns(3)
-
-    col5.metric(
-        "💰 Receita Pilates",
-        f"R$ {receita_pilates:.2f}"
-    )
-
-    col6.metric(
-        "🩺 Receita Fisioterapia",
-        f"R$ {receita_fisio:.2f}"
-    )
-
-    col7.metric(
-        "💵 Receita total",
-        f"R$ {receita_total:.2f}"
-    )
-
-    col8, col9, col10 = st.columns(3)
-
-    col8.metric(
-        "💸 Despesas",
-        f"R$ {despesas_mes:.2f}"
-    )
-
-    col9.metric(
-        "📈 Resultado",
-        f"R$ {resultado_mes:.2f}"
-    )
-
-    col10.metric(
-        "⏳ Pendentes",
-        f"R$ {pagamentos_pendentes:.2f}"
-    )
-
-    st.divider()
-
-    # =========================
     # RESUMO DAS TURMAS
     # =========================
 
@@ -877,7 +835,7 @@ if menu == "🏠 Início":
             t.dias,
             t.horario,
             t.limite_alunos,
-            COUNT(a.id)
+            COUNT(a.id) as total_alunos
         FROM turmas t
         LEFT JOIN alunos a
             ON a.turma_id = t.id
@@ -899,55 +857,75 @@ if menu == "🏠 Início":
         )
 
     else:
-        for turma in ocupacao_turmas:
+        colunas = st.columns(3)
+
+        for indice, turma in enumerate(ocupacao_turmas):
+            turma_id = turma[0]
             dias = turma[1]
             horario = turma[2]
             limite = turma[3] or 0
-            ocupados = turma[4] or 0
+            total_alunos = turma[4] or 0
 
-            vagas = limite - ocupados
+            vagas = limite - total_alunos
 
             if vagas < 0:
                 vagas = 0
 
-            percentual = 0
-
             if limite > 0:
-                percentual = ocupados / limite
+                percentual = total_alunos / limite
+            else:
+                percentual = 0
 
-            col_turma, col_vagas = st.columns(
-                [4, 1]
-            )
+            if vagas == 0:
+                status = "🔴 Lotada"
+            elif vagas == 1:
+                status = "🟡 Última vaga"
+            else:
+                status = "🟢 Disponível"
 
-            with col_turma:
-                st.markdown(
-                    f"**{dias} - {horario}**"
-                )
+            coluna = colunas[indice % 3]
 
-                st.progress(
-                    min(percentual, 1.0)
-                )
+            with coluna:
+                with st.container(border=True):
+                    st.markdown(
+                        f"**{dias}**"
+                    )
 
-            with col_vagas:
-                st.metric(
-                    "Vagas",
-                    vagas
-                )
+                    st.markdown(
+                        f"🕐 {horario}"
+                    )
 
-            st.caption(
-                f"{ocupados} de {limite} alunos cadastrados"
-            )
+                    st.progress(percentual)
 
-            st.divider()
+                    st.caption(
+                        f"{total_alunos} de {limite} alunos"
+                    )
+
+                    col_a, col_b = st.columns(2)
+
+                    col_a.metric(
+                        "Alunos",
+                        total_alunos
+                    )
+
+                    col_b.metric(
+                        "Vagas",
+                        vagas
+                    )
+
+                    st.caption(status)
+
+            if (indice + 1) % 3 == 0:
+                colunas = st.columns(3)
 
 elif menu == "👥 Alunos":
     st.title("Alunos")
-
-    aba_cadastro, aba_lista, aba_edicao = st.tabs(
+    aba_cadastro, aba_lista, aba_edicao, aba_historico_aluno = st.tabs(
         [
             "➕ Cadastrar",
             "👥 Alunos cadastrados",
-            "✏️ Editar / Excluir"
+            "✏️ Editar / Excluir",
+            "📚 Histórico do aluno"
         ]
     )
 
@@ -957,116 +935,120 @@ elif menu == "👥 Alunos":
     with aba_cadastro:
         st.subheader("Cadastrar aluno")
 
-        nome = st.text_input(
-            "Nome do aluno",
-            key="cadastro_nome"
-        )
-
-        telefone = st.text_input(
-            "Telefone",
-            key="cadastro_telefone"
-        )
-
-        cpf = st.text_input(
-            "CPF",
-            key="cadastro_cpf"
-        )
-
-        endereco = st.text_input(
-            "Endereço",
-            key="cadastro_endereco"
-        )
-
-        data_nascimento = st.text_input(
-            "Data de nascimento",
-            placeholder="DD/MM/AAAA",
-            key="cadastro_nascimento"
-        )
-
-        tabela_preco = st.selectbox(
-            "Tabela de preço",
-            [
-                "Antigo",
-                "Novo"
-            ],
-            key="cadastro_tabela"
-        )
-
         cursor.execute("""
-            SELECT id, dias, horario
+            SELECT
+                turmas.id,
+                turmas.dias,
+                turmas.horario,
+                turmas.limite_alunos,
+                COUNT(alunos.id) AS ocupados
             FROM turmas
-            ORDER BY dias, horario
+            LEFT JOIN alunos
+                ON alunos.turma_id = turmas.id
+            GROUP BY
+                turmas.id,
+                turmas.dias,
+                turmas.horario,
+                turmas.limite_alunos
+            HAVING COUNT(alunos.id) < turmas.limite_alunos
+            ORDER BY
+                turmas.dias,
+                turmas.horario
         """)
 
         turmas_cadastradas = cursor.fetchall()
 
         if len(turmas_cadastradas) == 0:
             st.warning(
-                "Cadastre uma turma antes de cadastrar alunos."
+                "Não há turmas com vagas disponíveis."
             )
-
-            turma = None
-            turma_id = None
 
         else:
             opcoes_turmas = {
-                f"{t[1]} - {t[2]}": t[0]
+                f"{t[1]} - {t[2]} | {t[3] - t[4]} vaga(s)": t[0]
                 for t in turmas_cadastradas
             }
 
-            turma = st.selectbox(
-                "Turma",
-                list(opcoes_turmas.keys()),
-                key="cadastro_turma"
-            )
-
-            turma_id = opcoes_turmas[turma]
-
-        if st.button(
-            "Cadastrar aluno",
-            key="botao_cadastrar_aluno"
-        ):
-            if nome.strip() == "":
-                st.warning(
-                    "Digite o nome do aluno."
+            with st.form(
+                "form_cadastro_aluno",
+                clear_on_submit=True
+            ):
+                nome = st.text_input(
+                    "Nome do aluno"
                 )
 
-            elif turma_id is None:
-                st.warning(
-                    "Selecione uma turma."
+                telefone = st.text_input(
+                    "Telefone"
                 )
 
-            else:
-                cursor.execute("""
-                    INSERT INTO alunos
-                    (
-                        nome,
-                        telefone,
-                        cpf,
-                        endereco,
-                        data_nascimento,
-                        turma,
-                        turma_id,
-                        tabela_preco
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    nome,
-                    telefone,
-                    cpf,
-                    endereco,
-                    data_nascimento,
-                    turma,
-                    turma_id,
-                    tabela_preco
-                ))
-
-                conn.commit()
-
-                st.success(
-                    f"Aluno {nome} cadastrado com sucesso!"
+                cpf = st.text_input(
+                    "CPF"
                 )
 
+                endereco = st.text_input(
+                    "Endereço"
+                )
+
+                data_nascimento = st.text_input(
+                    "Data de nascimento",
+                    placeholder="DD/MM/AAAA"
+                )
+
+                tabela_preco = st.selectbox(
+                    "Tabela de preço",
+                    [
+                        "Antigo",
+                        "Novo"
+                    ]
+                )
+
+                turma = st.selectbox(
+                    "Turma",
+                    list(opcoes_turmas.keys())
+                )
+
+                cadastrar = st.form_submit_button(
+                    "Cadastrar aluno"
+                )
+
+                if cadastrar:
+                    turma_id = opcoes_turmas[turma]
+
+                    if nome.strip() == "":
+                        st.warning(
+                            "Digite o nome do aluno."
+                        )
+
+                    else:
+                        cursor.execute("""
+                            INSERT INTO alunos
+                            (
+                                nome,
+                                telefone,
+                                cpf,
+                                endereco,
+                                data_nascimento,
+                                turma,
+                                turma_id,
+                                tabela_preco
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            nome,
+                            telefone,
+                            cpf,
+                            endereco,
+                            data_nascimento,
+                            turma,
+                            turma_id,
+                            tabela_preco
+                        ))
+
+                        conn.commit()
+
+                        st.success(
+                            f"Aluno {nome} cadastrado com sucesso!"
+                        )
     # =========================
     # ABA 2 - LISTA DE ALUNOS
     # =========================
@@ -1161,191 +1143,314 @@ elif menu == "👥 Alunos":
                 for aluno in alunos_edicao
             }
 
+            lista_alunos_edicao = [""] + list(opcoes_edicao.keys())
+
             aluno_selecionado = st.selectbox(
                 "Selecione o aluno",
-                list(opcoes_edicao.keys()),
+                lista_alunos_edicao,
+                index=0,
                 key="aluno_edicao"
             )
 
-            aluno_id_edicao = opcoes_edicao[
-                aluno_selecionado
-            ]
-
-            cursor.execute("""
-                SELECT
-                    nome,
-                    telefone,
-                    cpf,
-                    endereco,
-                    data_nascimento,
-                    turma,
-                    turma_id,
-                    tabela_preco
-                FROM alunos
-                WHERE id = ?
-            """, (
-                aluno_id_edicao,
-            ))
-
-            dados_aluno = cursor.fetchone()
-
-            novo_nome = st.text_input(
-                "Nome",
-                value=dados_aluno[0] or "",
-                key="editar_nome"
-            )
-
-            novo_telefone = st.text_input(
-                "Telefone",
-                value=dados_aluno[1] or "",
-                key="editar_telefone"
-            )
-
-            novo_cpf = st.text_input(
-                "CPF",
-                value=dados_aluno[2] or "",
-                key="editar_cpf"
-            )
-
-            novo_endereco = st.text_input(
-                "Endereço",
-                value=dados_aluno[3] or "",
-                key="editar_endereco"
-            )
-
-            nova_data_nascimento = st.text_input(
-                "Data de nascimento",
-                value=dados_aluno[4] or "",
-                placeholder="DD/MM/AAAA",
-                key="editar_nascimento"
-            )
-
-            opcoes_tabela = [
-                "Antigo",
-                "Novo"
-            ]
-
-            tabela_atual = dados_aluno[7]
-
-            if tabela_atual in opcoes_tabela:
-                indice_tabela = opcoes_tabela.index(
-                    tabela_atual
-                )
-            else:
-                indice_tabela = 0
-
-            nova_tabela_preco = st.selectbox(
-                "Tabela de preço",
-                opcoes_tabela,
-                index=indice_tabela,
-                key="editar_tabela_preco"
-            )
-
-            cursor.execute("""
-                SELECT id, dias, horario
-                FROM turmas
-                ORDER BY dias, horario
-            """)
-
-            turmas_edicao = cursor.fetchall()
-
-            if len(turmas_edicao) == 0:
-                st.warning(
-                    "Nenhuma turma cadastrada."
+            if aluno_selecionado == "":
+                st.info(
+                    "Digite ou selecione um aluno para editar."
                 )
 
             else:
-                opcoes_turmas_edicao = {
-                    f"{t[1]} - {t[2]}": t[0]
-                    for t in turmas_edicao
-                }
-
-                nomes_turmas = list(
-                    opcoes_turmas_edicao.keys()
-                )
-
-                turma_atual = dados_aluno[5]
-
-                if turma_atual in nomes_turmas:
-                    indice_turma = nomes_turmas.index(
-                        turma_atual
-                    )
-                else:
-                    indice_turma = 0
-
-                nova_turma = st.selectbox(
-                    "Turma",
-                    nomes_turmas,
-                    index=indice_turma,
-                    key="editar_turma"
-                )
-
-                nova_turma_id = opcoes_turmas_edicao[
-                    nova_turma
+                aluno_id_edicao = opcoes_edicao[
+                    aluno_selecionado
                 ]
 
-                col_editar, col_excluir = st.columns(2)
+                cursor.execute("""
+                    SELECT
+                        nome,
+                        telefone,
+                        cpf,
+                        endereco,
+                        data_nascimento,
+                        turma,
+                        turma_id,
+                        tabela_preco
+                    FROM alunos
+                    WHERE id = ?
+                """, (
+                    aluno_id_edicao,
+                ))
 
-                if col_editar.button(
-                    "Salvar alterações",
-                    key="salvar_edicao_aluno"
-                ):
-                    cursor.execute("""
-                        UPDATE alunos
-                        SET
-                            nome = ?,
-                            telefone = ?,
-                            cpf = ?,
-                            endereco = ?,
-                            data_nascimento = ?,
-                            turma = ?,
-                            turma_id = ?,
-                            tabela_preco = ?
-                        WHERE id = ?
-                    """, (
-                        novo_nome,
-                        novo_telefone,
-                        novo_cpf,
-                        novo_endereco,
-                        nova_data_nascimento,
-                        nova_turma,
-                        nova_turma_id,
-                        nova_tabela_preco,
-                        aluno_id_edicao
-                    ))
+                dados_aluno = cursor.fetchone()
 
-                    conn.commit()
+                novo_nome = st.text_input(
+                    "Nome",
+                    value=dados_aluno[0] or "",
+                    key=f"editar_nome_{aluno_id_edicao}"
+                )
 
-                    st.success(
-                        "Aluno atualizado com sucesso!"
+                novo_telefone = st.text_input(
+                    "Telefone",
+                    value=dados_aluno[1] or "",
+                    key=f"editar_telefone_{aluno_id_edicao}"
+                )
+
+                novo_cpf = st.text_input(
+                    "CPF",
+                    value=dados_aluno[2] or "",
+                    key=f"editar_cpf_{aluno_id_edicao}"
+                )
+
+                novo_endereco = st.text_input(
+                    "Endereço",
+                    value=dados_aluno[3] or "",
+                    key=f"editar_endereco_{aluno_id_edicao}"
+                )
+
+                nova_data_nascimento = st.text_input(
+                    "Data de nascimento",
+                    value=dados_aluno[4] or "",
+                    placeholder="DD/MM/AAAA",
+                    key=f"editar_nascimento_{aluno_id_edicao}"
+                )
+
+                opcoes_tabela = [
+                    "Antigo",
+                    "Novo"
+                ]
+
+                tabela_atual = dados_aluno[7]
+
+                if tabela_atual in opcoes_tabela:
+                    indice_tabela = opcoes_tabela.index(
+                        tabela_atual
+                    )
+                else:
+                    indice_tabela = 0
+
+                nova_tabela_preco = st.selectbox(
+                    "Tabela de preço",
+                    opcoes_tabela,
+                    index=indice_tabela,
+                    key=f"editar_tabela_preco_{aluno_id_edicao}"
+                )
+
+                cursor.execute("""
+                    SELECT id, dias, horario
+                    FROM turmas
+                    ORDER BY dias, horario
+                """)
+
+                turmas_edicao = cursor.fetchall()
+
+                if len(turmas_edicao) == 0:
+                    st.warning(
+                        "Nenhuma turma cadastrada."
                     )
 
-                if col_excluir.button(
-                    "Excluir aluno",
-                    key="excluir_aluno"
-                ):
-                    cursor.execute(
-                        "DELETE FROM alunos WHERE id = ?",
-                        (
-                            aluno_id_edicao,
+                else:
+                    opcoes_turmas_edicao = {
+                        f"{t[1]} - {t[2]}": t[0]
+                        for t in turmas_edicao
+                    }
+
+                    nomes_turmas = list(
+                        opcoes_turmas_edicao.keys()
+                    )
+
+                    turma_atual = dados_aluno[5]
+
+                    if turma_atual in nomes_turmas:
+                        indice_turma = nomes_turmas.index(
+                            turma_atual
                         )
+                    else:
+                        indice_turma = 0
+
+                    nova_turma = st.selectbox(
+                        "Turma",
+                        nomes_turmas,
+                        index=indice_turma,
+                        key=f"editar_turma_{aluno_id_edicao}"
                     )
 
-                    conn.commit()
+                    nova_turma_id = opcoes_turmas_edicao[
+                        nova_turma
+                    ]
 
-                    st.success(
-                        "Aluno excluído com sucesso!"
+                    col_editar, col_excluir = st.columns(2)
+
+                    if col_editar.button(
+                        "Salvar alterações",
+                        key=f"salvar_edicao_aluno_{aluno_id_edicao}"
+                    ):
+                        cursor.execute("""
+                            UPDATE alunos
+                            SET
+                                nome = ?,
+                                telefone = ?,
+                                cpf = ?,
+                                endereco = ?,
+                                data_nascimento = ?,
+                                turma = ?,
+                                turma_id = ?,
+                                tabela_preco = ?
+                            WHERE id = ?
+                        """, (
+                            novo_nome,
+                            novo_telefone,
+                            novo_cpf,
+                            novo_endereco,
+                            nova_data_nascimento,
+                            nova_turma,
+                            nova_turma_id,
+                            nova_tabela_preco,
+                            aluno_id_edicao
+                        ))
+
+                        conn.commit()
+
+                        st.success(
+                            "Aluno atualizado com sucesso!"
+                        )
+
+                    if col_excluir.button(
+                        "Excluir aluno",
+                        key=f"excluir_aluno_{aluno_id_edicao}"
+                    ):
+                        cursor.execute(
+                            """
+                            DELETE FROM alunos
+                            WHERE id = ?
+                            """,
+                            (
+                                aluno_id_edicao,
+                            )
+                        )
+
+                        conn.commit()
+
+                        st.success(
+                            "Aluno excluído com sucesso!"
+                        )
+
+                        st.rerun()    # =========================
+    # ABA 4 - HISTÓRICO DO ALUNO
+    # =========================
+    with aba_historico_aluno:
+        st.subheader("Histórico financeiro do aluno")
+
+        cursor.execute("""
+            SELECT id, nome
+            FROM alunos
+            ORDER BY nome
+        """)
+
+        alunos_historico = cursor.fetchall()
+
+        if len(alunos_historico) == 0:
+            st.info("Nenhum aluno cadastrado.")
+
+        else:
+            opcoes_historico = {
+                f"{aluno[1]} - ID {aluno[0]}": aluno[0]
+                for aluno in alunos_historico
+            }
+
+            lista_historico = [""] + list(opcoes_historico.keys())
+
+            aluno_historico_selecionado = st.selectbox(
+                "Selecione o aluno",
+                lista_historico,
+                index=0,
+                key="aluno_historico_financeiro"
+            )
+
+            if aluno_historico_selecionado == "":
+                st.info(
+                    "Digite ou selecione um aluno para consultar o histórico."
+                )
+
+            else:
+                aluno_id_historico = opcoes_historico[
+                    aluno_historico_selecionado
+                ]
+
+                cursor.execute("""
+                    SELECT
+                        valor,
+                        data_pagamento,
+                        forma_pagamento,
+                        status,
+                        plano
+                    FROM financeiro
+                    WHERE aluno_id = ?
+                    ORDER BY data_pagamento DESC, id DESC
+                """, (
+                    aluno_id_historico,
+                ))
+
+                pagamentos_aluno = cursor.fetchall()
+
+                if len(pagamentos_aluno) == 0:
+                    st.warning(
+                        "Este aluno ainda não possui pagamentos registrados."
                     )
+
+                else:
+                    ultimo_pagamento = pagamentos_aluno[0]
+
+                    st.subheader("💳 Situação atual")
+
+                    col1, col2, col3 = st.columns(3)
+
+                    col1.metric(
+                        "Plano",
+                        ultimo_pagamento[4] or "Não informado"
+                    )
+
+                    col2.metric(
+                        "Valor",
+                        f"R$ {ultimo_pagamento[0]:.2f}"
+                    )
+
+                    col3.metric(
+                        "Status",
+                        ultimo_pagamento[3]
+                    )
+
+                    st.write(
+                        f"**Data do pagamento:** "
+                        f"{ultimo_pagamento[1]}"
+                    )
+
+                    st.write(
+                        f"**Forma de pagamento:** "
+                        f"{ultimo_pagamento[2]}"
+                    )
+
+                    st.divider()
+
+                    st.subheader("📅 Histórico de pagamentos")
+
+                    for pagamento in pagamentos_aluno:
+                        st.write(
+                            f"**{pagamento[1]}** | "
+                            f"Plano: {pagamento[4] or 'Não informado'} | "
+                            f"Valor: R$ {pagamento[0]:.2f} | "
+                            f"{pagamento[2]} | "
+                            f"Status: {pagamento[3]}"
+                        )
+
+                        st.divider()
 elif menu == "📅 Turmas":
     st.title("Turmas")
 
-    aba_cadastro, aba_lista, aba_edicao = st.tabs(
-        [
-            "➕ Cadastrar",
-            "📋 Turmas cadastradas",
-            "✏️ Editar / Excluir"
-        ]
-    )
+    aba_cadastro, aba_lista, aba_edicao, aba_alunos_turma = st.tabs(
+    [
+        "➕ Cadastrar",
+        "📋 Turmas cadastradas",
+        "✏️ Editar / Excluir",
+        "👥 Alunos da turma"
+    ]
+)
 
     # =========================
     # ABA 1 - CADASTRAR
@@ -1709,6 +1814,164 @@ elif menu == "📅 Turmas":
                     st.success(
                         "Turma excluída com sucesso!"
                     )
+    # =========================
+    # ABA 4 - ALUNOS DA TURMA
+    # =========================
+    with aba_alunos_turma:
+        st.subheader("Alunos da turma")
+
+        cursor.execute("""
+            SELECT
+                id,
+                dias,
+                horario,
+                instrutor,
+                limite_alunos
+            FROM turmas
+            ORDER BY dias, horario
+        """)
+
+        turmas_consulta = cursor.fetchall()
+
+        if len(turmas_consulta) == 0:
+            st.info(
+                "Nenhuma turma cadastrada."
+            )
+
+        else:
+            opcoes_consulta_turma = {
+                f"{t[1]} - {t[2]}": t
+                for t in turmas_consulta
+            }
+
+            lista_consulta_turmas = (
+                [""]
+                + list(opcoes_consulta_turma.keys())
+            )
+
+            turma_consulta = st.selectbox(
+                "Selecione a turma",
+                lista_consulta_turmas,
+                index=0,
+                key="consultar_alunos_turma"
+            )
+
+            if turma_consulta == "":
+                st.info(
+                    "Selecione uma turma para visualizar os alunos."
+                )
+
+            else:
+                dados_turma_consulta = (
+                    opcoes_consulta_turma[
+                        turma_consulta
+                    ]
+                )
+
+                turma_id_consulta = (
+                    dados_turma_consulta[0]
+                )
+
+                instrutor_consulta = (
+                    dados_turma_consulta[3]
+                    or "Não informado"
+                )
+
+                limite_consulta = int(
+                    dados_turma_consulta[4] or 4
+                )
+
+                cursor.execute("""
+                    SELECT
+                        id,
+                        nome,
+                        telefone,
+                        tabela_preco
+                    FROM alunos
+                    WHERE turma_id = ?
+                    ORDER BY nome
+                """, (
+                    turma_id_consulta,
+                ))
+
+                alunos_da_turma = cursor.fetchall()
+
+                quantidade_alunos = len(
+                    alunos_da_turma
+                )
+
+                vagas_disponiveis = (
+                    limite_consulta
+                    - quantidade_alunos
+                )
+
+                if vagas_disponiveis < 0:
+                    vagas_disponiveis = 0
+
+                st.write(
+                    f"**Turma:** {turma_consulta}"
+                )
+
+                st.write(
+                    f"**Instrutor:** "
+                    f"{instrutor_consulta}"
+                )
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Alunos",
+                    quantidade_alunos
+                )
+
+                col2.metric(
+                    "Limite",
+                    limite_consulta
+                )
+
+                col3.metric(
+                    "Vagas",
+                    vagas_disponiveis
+                )
+
+                st.divider()
+
+                if quantidade_alunos == 0:
+                    st.info(
+                        "Nenhum aluno cadastrado nesta turma."
+                    )
+
+                else:
+                    st.subheader(
+                        "👥 Alunos matriculados"
+                    )
+
+                    for numero, aluno in enumerate(
+                        alunos_da_turma,
+                        start=1
+                    ):
+                        nome_aluno = aluno[1]
+                        telefone_aluno = (
+                            aluno[2]
+                            or "Não informado"
+                        )
+                        tabela_aluno = (
+                            aluno[3]
+                            or "Não informada"
+                        )
+
+                        st.write(
+                            f"**{numero}. "
+                            f"{nome_aluno}**"
+                        )
+
+                        st.caption(
+                            f"Telefone: "
+                            f"{telefone_aluno} | "
+                            f"Tabela: {tabela_aluno}"
+                        )
+
+                        st.divider()
 elif menu == "✅ Presenças":
     st.title("Presenças")
 
@@ -1726,7 +1989,7 @@ elif menu == "✅ Presenças":
         st.subheader("Fazer chamada")
 
         cursor.execute("""
-            SELECT id, dias, horario
+            SELECT id, dias, horario, instrutor
             FROM turmas
             ORDER BY dias, horario
         """)
@@ -1754,10 +2017,56 @@ elif menu == "✅ Presenças":
                 turma_escolhida
             ]
 
+            instrutor_padrao = None
+
+            for turma in turmas_presenca:
+                if turma[0] == turma_id_presenca:
+                    instrutor_padrao = turma[3]
+                    break
+
             data_aula = st.date_input(
                 "Data da aula",
                 key="presenca_data"
             )
+
+            cursor.execute("""
+                SELECT nome
+                FROM instrutores
+                ORDER BY nome
+            """)
+
+            instrutores_cadastrados = cursor.fetchall()
+
+            nomes_instrutores = [
+                i[0]
+                for i in instrutores_cadastrados
+            ]
+
+            if len(nomes_instrutores) == 0:
+                st.warning(
+                    "Nenhum instrutor cadastrado."
+                )
+
+                instrutor_aula = instrutor_padrao
+
+            else:
+                if instrutor_padrao in nomes_instrutores:
+                    indice_instrutor = nomes_instrutores.index(
+                        instrutor_padrao
+                    )
+                else:
+                    indice_instrutor = 0
+
+                instrutor_aula = st.selectbox(
+                    "👨‍🏫 Instrutor desta aula",
+                    nomes_instrutores,
+                    index=indice_instrutor,
+                    key=(
+                        f"instrutor_aula_"
+                        f"{turma_id_presenca}_"
+                        f"{data_aula}"
+                    )
+                )
 
             cursor.execute("""
                 SELECT id, nome
@@ -1770,9 +2079,32 @@ elif menu == "✅ Presenças":
 
             alunos_turma = cursor.fetchall()
 
-            if len(alunos_turma) == 0:
+            cursor.execute("""
+                SELECT
+                    a.id,
+                    a.nome,
+                    r.id
+                FROM reposicoes r
+                INNER JOIN alunos a
+                    ON r.aluno_id = a.id
+                WHERE r.turma_reposicao_id = ?
+                AND r.data_reposicao = ?
+                AND r.status = 'Agendada'
+                ORDER BY a.nome
+            """, (
+                turma_id_presenca,
+                str(data_aula)
+            ))
+
+            alunos_reposicao = cursor.fetchall()
+
+            if (
+                len(alunos_turma) == 0
+                and len(alunos_reposicao) == 0
+            ):
                 st.warning(
-                    "Não há alunos cadastrados nessa turma."
+                    "Não há alunos cadastrados "
+                    "ou reposições agendadas nessa turma."
                 )
 
             else:
@@ -1788,7 +2120,8 @@ elif menu == "✅ Presenças":
                         aluno_nome,
                         [
                             "Presente",
-                            "Falta"
+                            "Falta",
+                            "Reposição"
                         ],
                         horizontal=True,
                         key=f"presenca_{aluno_id}"
@@ -1803,6 +2136,36 @@ elif menu == "✅ Presenças":
                         )
                     )
 
+                if len(alunos_reposicao) > 0:
+                    st.markdown(
+                        "### 🔄 Reposições agendadas"
+                    )
+
+                for reposicao in alunos_reposicao:
+                    aluno_id = reposicao[0]
+                    aluno_nome = reposicao[1]
+                    reposicao_id = reposicao[2]
+
+                    status = st.radio(
+                        f"🔄 {aluno_nome}",
+                        [
+                            "Reposição",
+                            "Não compareceu"
+                        ],
+                        horizontal=True,
+                        key=f"reposicao_chamada_{reposicao_id}"
+                    )
+
+                    presencas_marcadas.append(
+                        (
+                            aluno_id,
+                            turma_id_presenca,
+                            str(data_aula),
+                            status,
+                            reposicao_id
+                        )
+                    )
+
                 if st.button(
                     "Salvar chamada",
                     key="salvar_chamada"
@@ -1812,6 +2175,11 @@ elif menu == "✅ Presenças":
                         turma_id = presenca[1]
                         data = presenca[2]
                         status = presenca[3]
+
+                        if len(presenca) > 4:
+                            reposicao_id = presenca[4]
+                        else:
+                            reposicao_id = None
 
                         cursor.execute("""
                             SELECT id
@@ -1832,10 +2200,13 @@ elif menu == "✅ Presenças":
                         if presenca_existente:
                             cursor.execute("""
                                 UPDATE presencas
-                                SET status = ?
+                                SET
+                                    status = ?,
+                                    instrutor_aula = ?
                                 WHERE id = ?
                             """, (
                                 status,
+                                instrutor_aula,
                                 presenca_existente[0]
                             ))
 
@@ -1846,14 +2217,28 @@ elif menu == "✅ Presenças":
                                     aluno_id,
                                     turma_id,
                                     data,
-                                    status
+                                    status,
+                                    instrutor_aula
                                 )
-                                VALUES (?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?)
                             """, (
                                 aluno_id,
                                 turma_id,
                                 data,
-                                status
+                                status,
+                                instrutor_aula
+                            ))
+
+                        if (
+                            reposicao_id is not None
+                            and status == "Reposição"
+                        ):
+                            cursor.execute("""
+                                UPDATE reposicoes
+                                SET status = 'Realizada'
+                                WHERE id = ?
+                            """, (
+                                reposicao_id,
                             ))
 
                     conn.commit()
@@ -1861,6 +2246,8 @@ elif menu == "✅ Presenças":
                     st.success(
                         "Chamada salva com sucesso!"
                     )
+
+                    st.rerun()
 
     # =========================
     # ABA 2 - HISTÓRICO
@@ -3239,18 +3626,19 @@ elif menu == "💸 Despesas":
 elif menu == "🔄 Reposições":
     st.title("Reposições")
 
-    aba_registro, aba_lista = st.tabs(
+    aba_registro, aba_agendar, aba_lista = st.tabs(
         [
-            "➕ Registrar reposição",
+            "➕ Registrar falta",
+            "📅 Agendar reposição",
             "📋 Reposições registradas"
         ]
     )
 
     # =========================
-    # ABA 1 - REGISTRAR
+    # ABA 1 - REGISTRAR FALTA
     # =========================
     with aba_registro:
-        st.subheader("Registrar reposição")
+        st.subheader("Registrar falta / direito à reposição")
 
         cursor.execute("""
             SELECT id, nome
@@ -3267,7 +3655,7 @@ elif menu == "🔄 Reposições":
 
         else:
             opcoes_alunos = {
-                aluno[1]: aluno[0]
+                f"{aluno[1]} - ID {aluno[0]}": aluno[0]
                 for aluno in alunos_reposicao
             }
 
@@ -3300,24 +3688,20 @@ elif menu == "🔄 Reposições":
                 key="reposicao_direito"
             )
 
-            data_reposicao = st.date_input(
-                "Data da reposição",
-                key="reposicao_data"
-            )
-
-            status_reposicao = st.selectbox(
-                "Status",
-                [
-                    "Pendente",
-                    "Realizada"
-                ],
-                key="reposicao_status"
+            st.caption(
+                "A data e a turma da reposição serão "
+                "definidas depois, quando houver vaga."
             )
 
             if st.button(
-                "Salvar reposição",
+                "Salvar falta",
                 key="salvar_reposicao"
             ):
+                if direito_reposicao == "Sim":
+                    status_reposicao = "Pendente"
+                else:
+                    status_reposicao = "Sem direito"
+
                 cursor.execute("""
                     INSERT INTO reposicoes
                     (
@@ -3326,43 +3710,165 @@ elif menu == "🔄 Reposições":
                         motivo,
                         direito_reposicao,
                         data_reposicao,
-                        status
+                        status,
+                        turma_reposicao_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     aluno_id_reposicao,
                     str(data_falta),
                     motivo,
                     direito_reposicao,
-                    str(data_reposicao),
-                    status_reposicao
+                    None,
+                    status_reposicao,
+                    None
                 ))
 
                 conn.commit()
 
                 st.success(
-                    "Reposição salva com sucesso!"
+                    "Falta registrada com sucesso!"
                 )
 
     # =========================
-    # ABA 2 - REPOSIÇÕES REGISTRADAS
+    # ABA 2 - AGENDAR REPOSIÇÃO
+    # =========================
+    with aba_agendar:
+        st.subheader("Agendar reposição")
+
+        cursor.execute("""
+            SELECT
+                r.id,
+                a.nome,
+                r.data_falta
+            FROM reposicoes r
+            INNER JOIN alunos a
+                ON r.aluno_id = a.id
+            WHERE r.direito_reposicao = 'Sim'
+            AND r.status = 'Pendente'
+            ORDER BY r.data_falta, a.nome
+        """)
+
+        reposicoes_pendentes = cursor.fetchall()
+
+        if len(reposicoes_pendentes) == 0:
+            st.info(
+                "Nenhuma reposição pendente."
+            )
+
+        else:
+            opcoes_pendentes = {
+                (
+                    f"{r[1]} | "
+                    f"Falta: {r[2]} | "
+                    f"ID {r[0]}"
+                ): r[0]
+                for r in reposicoes_pendentes
+            }
+
+            reposicao_escolhida = st.selectbox(
+                "Aluno / falta",
+                list(opcoes_pendentes.keys()),
+                key="agendar_reposicao_aluno"
+            )
+
+            reposicao_id = opcoes_pendentes[
+                reposicao_escolhida
+            ]
+
+            data_reposicao = st.date_input(
+                "Data da reposição",
+                key="agendar_data_reposicao"
+            )
+
+            cursor.execute("""
+                SELECT
+                    id,
+                    dias,
+                    horario,
+                    instrutor
+                FROM turmas
+                ORDER BY dias, horario
+            """)
+
+            turmas_reposicao = cursor.fetchall()
+
+            if len(turmas_reposicao) == 0:
+                st.warning(
+                    "Nenhuma turma cadastrada."
+                )
+
+            else:
+                opcoes_turmas_reposicao = {
+                    (
+                        f"{t[1]} - {t[2]} | "
+                        f"Instrutor: {t[3]}"
+                    ): t[0]
+                    for t in turmas_reposicao
+                }
+
+                turma_reposicao = st.selectbox(
+                    "Turma onde fará a reposição",
+                    list(
+                        opcoes_turmas_reposicao.keys()
+                    ),
+                    key="agendar_turma_reposicao"
+                )
+
+                turma_reposicao_id = (
+                    opcoes_turmas_reposicao[
+                        turma_reposicao
+                    ]
+                )
+
+                if st.button(
+                    "Agendar reposição",
+                    key="botao_agendar_reposicao"
+                ):
+                    cursor.execute("""
+                        UPDATE reposicoes
+                        SET
+                            data_reposicao = ?,
+                            turma_reposicao_id = ?,
+                            status = 'Agendada'
+                        WHERE id = ?
+                    """, (
+                        str(data_reposicao),
+                        turma_reposicao_id,
+                        reposicao_id
+                    ))
+
+                    conn.commit()
+
+                    st.success(
+                        "Reposição agendada com sucesso!"
+                    )
+
+                    st.rerun()
+
+    # =========================
+    # ABA 3 - REPOSIÇÕES REGISTRADAS
     # =========================
     with aba_lista:
         st.subheader("Reposições registradas")
 
         cursor.execute("""
             SELECT
-                reposicoes.id,
-                alunos.nome,
-                reposicoes.data_falta,
-                reposicoes.motivo,
-                reposicoes.direito_reposicao,
-                reposicoes.data_reposicao,
-                reposicoes.status
-            FROM reposicoes
-            INNER JOIN alunos
-                ON reposicoes.aluno_id = alunos.id
-            ORDER BY reposicoes.id DESC
+                r.id,
+                a.nome,
+                r.data_falta,
+                r.motivo,
+                r.direito_reposicao,
+                r.data_reposicao,
+                r.status,
+                t.dias,
+                t.horario
+            FROM reposicoes r
+            INNER JOIN alunos a
+                ON r.aluno_id = a.id
+            LEFT JOIN turmas t
+                ON r.turma_reposicao_id = t.id
+            ORDER BY r.id DESC
         """)
 
         reposicoes = cursor.fetchall()
@@ -3375,17 +3881,51 @@ elif menu == "🔄 Reposições":
         else:
             for reposicao in reposicoes:
                 st.write(
-                    f"**{reposicao[1]}** | "
+                    f"**{reposicao[1]}**"
+                )
+
+                st.write(
                     f"Falta: {reposicao[2]} | "
                     f"Direito: {reposicao[4]} | "
-                    f"Reposição: {reposicao[5]} | "
                     f"Status: {reposicao[6]}"
                 )
+
+                if reposicao[5]:
+                    st.write(
+                        f"📅 Reposição: "
+                        f"{reposicao[5]}"
+                    )
+
+                if reposicao[7]:
+                    st.write(
+                        f"🏫 Turma: "
+                        f"{reposicao[7]} - "
+                        f"{reposicao[8]}"
+                    )
 
                 if reposicao[3]:
                     st.caption(
                         f"Motivo: {reposicao[3]}"
                     )
+                if st.button(
+                    "🗑️ Excluir reposição",
+                    key=f"excluir_reposicao_{reposicao[0]}"
+                ):
+                    cursor.execute("""
+                        DELETE FROM reposicoes
+                        WHERE id = ?
+                    """, (
+                        reposicao[0],
+                    ))
+
+                    conn.commit()
+
+                    st.success(
+                        "Reposição excluída com sucesso!"
+                    )
+
+                    st.rerun()
+                st.divider()
 elif menu == "👨‍🏫 Instrutores":
     st.title("Instrutores")
 
@@ -3521,27 +4061,48 @@ elif menu == "👨‍🏫 Instrutores":
         )
 
         cursor.execute("""
-            SELECT
-                i.nome,
-                i.percentual,
-                COUNT(p.id) AS presencas
-            FROM instrutores i
-            LEFT JOIN turmas t
-                ON t.instrutor = i.nome
-            LEFT JOIN presencas p
-                ON p.turma_id = t.id
-                AND p.status = 'Presente'
-                AND p.data BETWEEN ? AND ?
-            GROUP BY
-                i.id,
-                i.nome,
-                i.percentual
-            ORDER BY i.nome
-        """, (
-            str(data_inicio),
-            str(data_fim)
-        ))
+    SELECT
+        i.nome,
+        i.percentual,
 
+        (
+            SELECT COUNT(*)
+            FROM presencas p
+            WHERE p.instrutor_aula = i.nome
+
+            AND p.data BETWEEN ? AND ?
+
+            AND (
+                p.status = 'Presente'
+
+                OR (
+                    p.status = 'Falta'
+
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM reposicoes r
+                        WHERE r.aluno_id = p.aluno_id
+                        AND r.data_falta = p.data
+                        AND r.direito_reposicao = 'Sim'
+                        AND r.status IN (
+                            'Pendente',
+                             '
+                            'Realizada'
+                        )
+                    )
+                )
+
+                OR p.status = 'Reposição'
+            )
+        ) AS presencas
+
+    FROM instrutores i
+
+    ORDER BY i.nome
+""", (
+    str(data_inicio),
+    str(data_fim)
+))
         pagamentos_instrutores = cursor.fetchall()
 
         if len(pagamentos_instrutores) == 0:
@@ -3559,7 +4120,7 @@ elif menu == "👨‍🏫 Instrutores":
 
                 valor_por_presenca = (
                     valor_aula_aluno
-                    * percentual
+                    *float(percentual)
                     / 100
                 )
 
