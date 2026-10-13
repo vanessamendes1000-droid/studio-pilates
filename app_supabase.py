@@ -1331,7 +1331,8 @@ elif menu == "👥 Alunos":
                             "Aluno excluído com sucesso!"
                         )
 
-                        st.rerun()    # =========================
+                        st.rerun()   
+    # =========================
     # ABA 4 - HISTÓRICO DO ALUNO
     # =========================
     with aba_historico_aluno:
@@ -1397,6 +1398,59 @@ elif menu == "👥 Alunos":
                 else:
                     ultimo_pagamento = pagamentos_aluno[0]
 
+                    plano_atual = ultimo_pagamento[4] or ""
+
+                    if "24" in str(plano_atual):
+                        total_aulas_plano = 24
+                    else:
+                        total_aulas_plano = 8
+
+                    data_inicio_ciclo = ultimo_pagamento[1]
+
+                    cursor.execute("""
+                        SELECT COUNT(*)
+                        FROM presencas p
+                        WHERE p.aluno_id = ?
+                        AND p.data >= ?
+                        AND (
+                            p.status = 'Presente'
+
+                            OR p.status = 'Reposição'
+
+                            OR (
+                                p.status = 'Falta'
+
+                                AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM reposicoes r
+                                    WHERE r.aluno_id = p.aluno_id
+                                    AND r.data_falta = p.data
+                                    AND r.direito_reposicao = 'Sim'
+                                    AND r.status IN (
+                                        'Pendente',
+                                        'Agendada',
+                                        'Realizada'
+                                    )
+                                )
+                            )
+                        )
+                    """, (
+                        aluno_id_historico,
+                        data_inicio_ciclo
+                    ))
+
+                    aulas_utilizadas = (
+                        cursor.fetchone()[0] or 0
+                    )
+
+                    aulas_restantes = (
+                        total_aulas_plano
+                        - aulas_utilizadas
+                    )
+
+                    if aulas_restantes < 0:
+                        aulas_restantes = 0
+
                     st.subheader("💳 Situação atual")
 
                     col1, col2, col3 = st.columns(3)
@@ -1415,7 +1469,22 @@ elif menu == "👥 Alunos":
                         "Status",
                         ultimo_pagamento[3]
                     )
+                    col4, col5, col6 = st.columns(3)
 
+                    col4.metric(
+                        "Aulas do plano",
+                        total_aulas_plano
+                    )
+
+                    col5.metric(
+                        "Aulas utilizadas",
+                        aulas_utilizadas
+                    )
+
+                    col6.metric(
+                        "Aulas restantes",
+                        aulas_restantes
+                    )
                     st.write(
                         f"**Data do pagamento:** "
                         f"{ultimo_pagamento[1]}"
@@ -1686,17 +1755,17 @@ elif menu == "📅 Turmas":
                 indice_dias = 0
 
             novos_dias = st.selectbox(
-                "Dias",
-                dias_opcoes,
-                index=indice_dias,
-                key="editar_dias_turma"
-            )
+    "Dias",
+    dias_opcoes,
+    index=indice_dias,
+    key=f"editar_dias_turma_{turma_id_edicao}"
+)
 
             novo_horario = st.text_input(
-                "Horário",
-                value=dados_turma[1] or "",
-                key="editar_horario_turma"
-            )
+    "Horário",
+    value=dados_turma[1] or "",
+    key=f"editar_horario_turma_{turma_id_edicao}"
+)
 
             cursor.execute("""
                 SELECT nome
@@ -1722,23 +1791,23 @@ elif menu == "📅 Turmas":
 
             if len(nomes_instrutores) > 0:
                 novo_instrutor = st.selectbox(
-                    "Instrutor",
-                    nomes_instrutores,
-                    index=indice_instrutor,
-                    key="editar_instrutor_turma"
-                )
+    "Instrutor",
+    nomes_instrutores,
+    index=indice_instrutor,
+    key=f"editar_instrutor_turma_{turma_id_edicao}"
+)
             else:
                 novo_instrutor = ""
 
             novo_limite = st.number_input(
-                "Limite de alunos",
-                min_value=1,
-                max_value=10,
-                value=int(
-                    dados_turma[3] or 4
-                ),
-                key="editar_limite_turma"
-            )
+    "Limite de alunos",
+    min_value=1,
+    max_value=10,
+    value=int(
+        dados_turma[3] or 4
+    ),
+    key=f"editar_limite_turma_{turma_id_edicao}"
+)
 
             col_salvar, col_excluir = st.columns(2)
 
@@ -2007,248 +2076,309 @@ elif menu == "✅ Presenças":
                 for t in turmas_presenca
             }
 
+            lista_turmas_presenca = (
+                [""]
+                + list(opcoes_turmas.keys())
+            )
+
             turma_escolhida = st.selectbox(
                 "Escolha a turma",
-                list(opcoes_turmas.keys()),
+                lista_turmas_presenca,
+                index=0,
                 key="presenca_turma"
             )
 
-            turma_id_presenca = opcoes_turmas[
-                turma_escolhida
-            ]
-
-            instrutor_padrao = None
-
-            for turma in turmas_presenca:
-                if turma[0] == turma_id_presenca:
-                    instrutor_padrao = turma[3]
-                    break
-
-            data_aula = st.date_input(
-                "Data da aula",
-                key="presenca_data"
-            )
-
-            cursor.execute("""
-                SELECT nome
-                FROM instrutores
-                ORDER BY nome
-            """)
-
-            instrutores_cadastrados = cursor.fetchall()
-
-            nomes_instrutores = [
-                i[0]
-                for i in instrutores_cadastrados
-            ]
-
-            if len(nomes_instrutores) == 0:
-                st.warning(
-                    "Nenhum instrutor cadastrado."
+            if turma_escolhida == "":
+                st.info(
+                    "Selecione uma turma para fazer a chamada."
                 )
 
-                instrutor_aula = instrutor_padrao
-
             else:
-                if instrutor_padrao in nomes_instrutores:
-                    indice_instrutor = nomes_instrutores.index(
+                turma_id_presenca = opcoes_turmas[
+                    turma_escolhida
+                ]
+
+                instrutor_padrao = None
+
+                for turma in turmas_presenca:
+                    if turma[0] == turma_id_presenca:
+                        instrutor_padrao = turma[3]
+                        break
+
+                data_aula = st.date_input(
+                    "Data da aula",
+                    key=(
+                        f"presenca_data_"
+                        f"{turma_id_presenca}"
+                    )
+                )
+
+                # =========================
+                # INSTRUTOR DESTA AULA
+                # =========================
+                cursor.execute("""
+                    SELECT nome
+                    FROM instrutores
+                    ORDER BY nome
+                """)
+
+                instrutores_cadastrados = (
+                    cursor.fetchall()
+                )
+
+                nomes_instrutores = [
+                    i[0]
+                    for i in instrutores_cadastrados
+                ]
+
+                if len(nomes_instrutores) == 0:
+                    st.warning(
+                        "Nenhum instrutor cadastrado."
+                    )
+
+                    instrutor_aula = (
                         instrutor_padrao
                     )
+
                 else:
-                    indice_instrutor = 0
+                    if (
+                        instrutor_padrao
+                        in nomes_instrutores
+                    ):
+                        indice_instrutor = (
+                            nomes_instrutores.index(
+                                instrutor_padrao
+                            )
+                        )
+                    else:
+                        indice_instrutor = 0
 
-                instrutor_aula = st.selectbox(
-                    "👨‍🏫 Instrutor desta aula",
-                    nomes_instrutores,
-                    index=indice_instrutor,
-                    key=(
-                        f"instrutor_aula_"
-                        f"{turma_id_presenca}_"
-                        f"{data_aula}"
-                    )
-                )
-
-            cursor.execute("""
-                SELECT id, nome
-                FROM alunos
-                WHERE turma_id = ?
-                ORDER BY nome
-            """, (
-                turma_id_presenca,
-            ))
-
-            alunos_turma = cursor.fetchall()
-
-            cursor.execute("""
-                SELECT
-                    a.id,
-                    a.nome,
-                    r.id
-                FROM reposicoes r
-                INNER JOIN alunos a
-                    ON r.aluno_id = a.id
-                WHERE r.turma_reposicao_id = ?
-                AND r.data_reposicao = ?
-                AND r.status = 'Agendada'
-                ORDER BY a.nome
-            """, (
-                turma_id_presenca,
-                str(data_aula)
-            ))
-
-            alunos_reposicao = cursor.fetchall()
-
-            if (
-                len(alunos_turma) == 0
-                and len(alunos_reposicao) == 0
-            ):
-                st.warning(
-                    "Não há alunos cadastrados "
-                    "ou reposições agendadas nessa turma."
-                )
-
-            else:
-                st.subheader("Alunos")
-
-                presencas_marcadas = []
-
-                for aluno in alunos_turma:
-                    aluno_id = aluno[0]
-                    aluno_nome = aluno[1]
-
-                    status = st.radio(
-                        aluno_nome,
-                        [
-                            "Presente",
-                            "Falta",
-                            "Reposição"
-                        ],
-                        horizontal=True,
-                        key=f"presenca_{aluno_id}"
-                    )
-
-                    presencas_marcadas.append(
-                        (
-                            aluno_id,
-                            turma_id_presenca,
-                            str(data_aula),
-                            status
+                    instrutor_aula = st.selectbox(
+                        "👨‍🏫 Instrutor desta aula",
+                        nomes_instrutores,
+                        index=indice_instrutor,
+                        key=(
+                            f"instrutor_aula_"
+                            f"{turma_id_presenca}_"
+                            f"{data_aula}"
                         )
                     )
 
-                if len(alunos_reposicao) > 0:
-                    st.markdown(
-                        "### 🔄 Reposições agendadas"
-                    )
+                # =========================
+                # ALUNOS FIXOS
+                # =========================
+                cursor.execute("""
+                    SELECT id, nome
+                    FROM alunos
+                    WHERE turma_id = ?
+                    ORDER BY nome
+                """, (
+                    turma_id_presenca,
+                ))
 
-                for reposicao in alunos_reposicao:
-                    aluno_id = reposicao[0]
-                    aluno_nome = reposicao[1]
-                    reposicao_id = reposicao[2]
+                alunos_turma = cursor.fetchall()
 
-                    status = st.radio(
-                        f"🔄 {aluno_nome}",
-                        [
-                            "Reposição",
-                            "Não compareceu"
-                        ],
-                        horizontal=True,
-                        key=f"reposicao_chamada_{reposicao_id}"
-                    )
+                # =========================
+                # REPOSIÇÕES AGENDADAS
+                # =========================
+                cursor.execute("""
+                    SELECT
+                        a.id,
+                        a.nome,
+                        r.id
+                    FROM reposicoes r
+                    INNER JOIN alunos a
+                        ON r.aluno_id = a.id
+                    WHERE r.turma_reposicao_id = ?
+                    AND r.data_reposicao = ?
+                    AND r.status = 'Agendada'
+                    ORDER BY a.nome
+                """, (
+                    turma_id_presenca,
+                    str(data_aula)
+                ))
 
-                    presencas_marcadas.append(
-                        (
-                            aluno_id,
-                            turma_id_presenca,
-                            str(data_aula),
-                            status,
-                            reposicao_id
-                        )
-                    )
+                alunos_reposicao = (
+                    cursor.fetchall()
+                )
 
-                if st.button(
-                    "Salvar chamada",
-                    key="salvar_chamada"
+                if (
+                    len(alunos_turma) == 0
+                    and len(alunos_reposicao) == 0
                 ):
-                    for presenca in presencas_marcadas:
-                        aluno_id = presenca[0]
-                        turma_id = presenca[1]
-                        data = presenca[2]
-                        status = presenca[3]
+                    st.warning(
+                        "Não há alunos cadastrados "
+                        "ou reposições agendadas "
+                        "nessa turma."
+                    )
 
-                        if len(presenca) > 4:
-                            reposicao_id = presenca[4]
-                        else:
-                            reposicao_id = None
+                else:
+                    st.subheader("Alunos")
 
-                        cursor.execute("""
-                            SELECT id
-                            FROM presencas
-                            WHERE aluno_id = ?
-                            AND turma_id = ?
-                            AND data = ?
-                        """, (
-                            aluno_id,
-                            turma_id,
-                            data
-                        ))
+                    presencas_marcadas = []
 
-                        presenca_existente = (
-                            cursor.fetchone()
+                    # =========================
+                    # ALUNOS DA TURMA
+                    # =========================
+                    for aluno in alunos_turma:
+                        aluno_id = aluno[0]
+                        aluno_nome = aluno[1]
+
+                        status = st.radio(
+                            aluno_nome,
+                            [
+                                "Presente",
+                                "Falta",
+                                "Reposição"
+                            ],
+                            horizontal=True,
+                            key=(
+                                f"presenca_"
+                                f"{turma_id_presenca}_"
+                                f"{aluno_id}_"
+                                f"{data_aula}"
+                            )
                         )
 
-                        if presenca_existente:
-                            cursor.execute("""
-                                UPDATE presencas
-                                SET
-                                    status = ?,
-                                    instrutor_aula = ?
-                                WHERE id = ?
-                            """, (
+                        presencas_marcadas.append(
+                            (
+                                aluno_id,
+                                turma_id_presenca,
+                                str(data_aula),
+                                status
+                            )
+                        )
+
+                    # =========================
+                    # ALUNOS DE REPOSIÇÃO
+                    # =========================
+                    if len(alunos_reposicao) > 0:
+                        st.markdown(
+                            "### 🔄 Reposições agendadas"
+                        )
+
+                    for reposicao in alunos_reposicao:
+                        aluno_id = reposicao[0]
+                        aluno_nome = reposicao[1]
+                        reposicao_id = reposicao[2]
+
+                        status = st.radio(
+                            f"🔄 {aluno_nome}",
+                            [
+                                "Reposição",
+                                "Não compareceu"
+                            ],
+                            horizontal=True,
+                            key=(
+                                f"reposicao_chamada_"
+                                f"{reposicao_id}_"
+                                f"{data_aula}"
+                            )
+                        )
+
+                        presencas_marcadas.append(
+                            (
+                                aluno_id,
+                                turma_id_presenca,
+                                str(data_aula),
                                 status,
-                                instrutor_aula,
-                                presenca_existente[0]
+                                reposicao_id
+                            )
+                        )
+
+                    # =========================
+                    # SALVAR CHAMADA
+                    # =========================
+                    if st.button(
+                        "Salvar chamada",
+                        key=(
+                            f"salvar_chamada_"
+                            f"{turma_id_presenca}_"
+                            f"{data_aula}"
+                        )
+                    ):
+                        for presenca in (
+                            presencas_marcadas
+                        ):
+                            aluno_id = presenca[0]
+                            turma_id = presenca[1]
+                            data = presenca[2]
+                            status = presenca[3]
+
+                            if len(presenca) > 4:
+                                reposicao_id = (
+                                    presenca[4]
+                                )
+                            else:
+                                reposicao_id = None
+
+                            cursor.execute("""
+                                SELECT id
+                                FROM presencas
+                                WHERE aluno_id = ?
+                                AND turma_id = ?
+                                AND data = ?
+                            """, (
+                                aluno_id,
+                                turma_id,
+                                data
                             ))
 
-                        else:
-                            cursor.execute("""
-                                INSERT INTO presencas
-                                (
+                            presenca_existente = (
+                                cursor.fetchone()
+                            )
+
+                            if presenca_existente:
+                                cursor.execute("""
+                                    UPDATE presencas
+                                    SET
+                                        status = ?,
+                                        instrutor_aula = ?
+                                    WHERE id = ?
+                                """, (
+                                    status,
+                                    instrutor_aula,
+                                    presenca_existente[0]
+                                ))
+
+                            else:
+                                cursor.execute("""
+                                    INSERT INTO presencas
+                                    (
+                                        aluno_id,
+                                        turma_id,
+                                        data,
+                                        status,
+                                        instrutor_aula
+                                    )
+                                    VALUES (?, ?, ?, ?, ?)
+                                """, (
                                     aluno_id,
                                     turma_id,
                                     data,
                                     status,
                                     instrutor_aula
-                                )
-                                VALUES (?, ?, ?, ?, ?)
-                            """, (
-                                aluno_id,
-                                turma_id,
-                                data,
-                                status,
-                                instrutor_aula
-                            ))
+                                ))
 
-                        if (
-                            reposicao_id is not None
-                            and status == "Reposição"
-                        ):
-                            cursor.execute("""
-                                UPDATE reposicoes
-                                SET status = 'Realizada'
-                                WHERE id = ?
-                            """, (
-                                reposicao_id,
-                            ))
+                            if (
+                                reposicao_id is not None
+                                and status == "Reposição"
+                            ):
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET status = 'Realizada'
+                                    WHERE id = ?
+                                """, (
+                                    reposicao_id,
+                                ))
 
-                    conn.commit()
+                        conn.commit()
 
-                    st.success(
-                        "Chamada salva com sucesso!"
-                    )
+                        st.success(
+                            "Chamada salva com sucesso!"
+                        )
 
-                    st.rerun()
-
+                        st.rerun()
     # =========================
     # ABA 2 - HISTÓRICO
     # =========================
@@ -2865,22 +2995,35 @@ elif menu == "🩺 Fisioterapia":
     with aba_atendimento:
         st.subheader("Novo atendimento")
 
+        if "fisio_form_version" not in st.session_state:
+            st.session_state.fisio_form_version = 0
+
+        versao_fisio = st.session_state.fisio_form_version
+
+        if st.session_state.pop(
+            "fisio_atendimento_salvo",
+            False
+        ):
+            st.success(
+                "Atendimento salvo com sucesso!"
+            )
+
         paciente = st.text_input(
             "Nome do paciente",
-            key="fisio_paciente"
+            key=f"fisio_paciente_{versao_fisio}"
         )
 
         data_atendimento = st.date_input(
             "Data do atendimento",
-            key="fisio_data"
+            key=f"fisio_data_{versao_fisio}"
         )
 
         valor_fisio = st.number_input(
             "Valor do atendimento",
             min_value=0.0,
-            value=70.0,
+            value=80.0,
             step=10.0,
-            key="fisio_valor"
+            key=f"fisio_valor_{versao_fisio}"
         )
 
         forma_pagamento_fisio = st.selectbox(
@@ -2891,27 +3034,34 @@ elif menu == "🩺 Fisioterapia":
                 "Débito",
                 "Crédito"
             ],
-            key="fisio_pagamento"
+            key=f"fisio_pagamento_{versao_fisio}"
         )
 
-        if forma_pagamento_fisio in ["Débito", "Crédito"]:
+        if forma_pagamento_fisio in [
+            "Débito",
+            "Crédito"
+        ]:
             taxa_fisio = st.number_input(
                 "Taxa do cartão (%)",
                 min_value=0.0,
                 max_value=100.0,
                 value=0.0,
                 step=0.1,
-                key="fisio_taxa"
+                key=f"fisio_taxa_{versao_fisio}"
             )
+
         else:
             taxa_fisio = 0.0
 
         valor_taxa_fisio = (
-            valor_fisio * taxa_fisio / 100
+            valor_fisio
+            * taxa_fisio
+            / 100
         )
 
         valor_liquido_fisio = (
-            valor_fisio - valor_taxa_fisio
+            valor_fisio
+            - valor_taxa_fisio
         )
 
         col1, col2 = st.columns(2)
@@ -2929,17 +3079,20 @@ elif menu == "🩺 Fisioterapia":
         profissional = st.text_input(
             "Profissional",
             value="Igor",
-            key="fisio_profissional"
+            key=f"fisio_profissional_{versao_fisio}"
         )
 
         observacao_fisio = st.text_area(
             "Observação",
-            key="fisio_observacao"
+            key=f"fisio_observacao_{versao_fisio}"
         )
 
         if st.button(
             "Salvar atendimento",
-            key="salvar_atendimento_fisio"
+            key=(
+                f"salvar_atendimento_fisio_"
+                f"{versao_fisio}"
+            )
         ):
             if paciente.strip() == "":
                 st.warning(
@@ -2975,108 +3128,13 @@ elif menu == "🩺 Fisioterapia":
 
                 conn.commit()
 
-                st.success(
-                    "Atendimento salvo com sucesso!"
-                )
+                st.session_state[
+                    "fisio_atendimento_salvo"
+                ] = True
 
-    # =========================
-    # ABA 2 - RESUMO
-    # =========================
-    with aba_resumo:
-        st.subheader(
-            "Resumo financeiro da Fisioterapia"
-        )
+                st.session_state.fisio_form_version += 1
 
-        cursor.execute("""
-            SELECT
-                COUNT(*),
-                SUM(valor),
-                SUM(valor_taxa),
-                SUM(valor_liquido)
-            FROM fisioterapia
-        """)
-
-        resumo_fisio = cursor.fetchone()
-
-        quantidade_atendimentos = (
-            resumo_fisio[0] or 0
-        )
-
-        total_bruto_fisio = (
-            resumo_fisio[1] or 0
-        )
-
-        total_taxas_fisio = (
-            resumo_fisio[2] or 0
-        )
-
-        total_liquido_fisio = (
-            resumo_fisio[3] or 0
-        )
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        col1.metric(
-            "Atendimentos",
-            quantidade_atendimentos
-        )
-
-        col2.metric(
-            "Total bruto",
-            f"R$ {total_bruto_fisio:.2f}"
-        )
-
-        col3.metric(
-            "Taxas",
-            f"R$ {total_taxas_fisio:.2f}"
-        )
-
-        col4.metric(
-            "Total líquido",
-            f"R$ {total_liquido_fisio:.2f}"
-        )
-
-        st.divider()
-        st.subheader("Atendimentos registrados")
-
-        cursor.execute("""
-            SELECT
-                paciente,
-                data,
-                valor,
-                forma_pagamento,
-                valor_taxa,
-                valor_liquido,
-                profissional,
-                observacao
-            FROM fisioterapia
-            ORDER BY id DESC
-        """)
-
-        atendimentos = cursor.fetchall()
-
-        if len(atendimentos) == 0:
-            st.info(
-                "Nenhum atendimento registrado."
-            )
-
-        else:
-            for atendimento in atendimentos:
-                st.write(
-                    f"**{atendimento[0]}** | "
-                    f"{atendimento[1]} | "
-                    f"Bruto: R$ {atendimento[2]:.2f} | "
-                    f"Taxa: R$ {(atendimento[4] or 0):.2f} | "
-                    f"Líquido: R$ {(atendimento[5] or 0):.2f} | "
-                    f"{atendimento[3]} | "
-                    f"Profissional: {atendimento[6]}"
-                )
-
-                if atendimento[7]:
-                    st.caption(
-                        f"Observação: {atendimento[7]}"
-                    )
-
+                st.rerun()  
     # =========================
     # ABA 3 - EDITAR / EXCLUIR
     # =========================
@@ -3143,7 +3201,7 @@ elif menu == "🩺 Fisioterapia":
             novo_paciente = st.text_input(
                 "Paciente",
                 value=dados_atendimento[0] or "",
-                key="editar_paciente_fisio"
+                key=f"editar_paciente_fisio_{atendimento_id}"
             )
 
             novo_valor_fisio = st.number_input(
@@ -3152,7 +3210,7 @@ elif menu == "🩺 Fisioterapia":
                 value=float(
                     dados_atendimento[1] or 0
                 ),
-                key="editar_valor_fisio"
+               key=f"editar_valor_fisio_{atendimento_id}"
             )
 
             formas_fisio = [
@@ -3175,7 +3233,7 @@ elif menu == "🩺 Fisioterapia":
                 "Forma de pagamento",
                 formas_fisio,
                 index=indice_forma_fisio,
-                key="editar_forma_fisio"
+                key=f"editar_forma_fisio_{atendimento_id}"
             )
 
             if nova_forma_fisio in ["Débito", "Crédito"]:
@@ -3186,7 +3244,7 @@ elif menu == "🩺 Fisioterapia":
                     value=float(
                         dados_atendimento[3] or 0
                     ),
-                    key="editar_taxa_fisio"
+                    key=f"editar_taxa_fisio_{atendimento_id}"
                 )
             else:
                 nova_taxa_fisio = 0.0
@@ -3205,13 +3263,13 @@ elif menu == "🩺 Fisioterapia":
             novo_profissional = st.text_input(
                 "Profissional",
                 value=dados_atendimento[4] or "",
-                key="editar_profissional_fisio"
+                key=f"editar_profissional_fisio_{atendimento_id}"
             )
 
             nova_observacao_fisio = st.text_area(
                 "Observação",
                 value=dados_atendimento[5] or "",
-                key="editar_observacao_fisio"
+                key=f"editar_observacao_fisio_{atendimento_id}"
             )
 
             col1, col2 = st.columns(2)
@@ -3230,7 +3288,7 @@ elif menu == "🩺 Fisioterapia":
 
             if col_salvar.button(
                 "Salvar alterações",
-                key="salvar_edicao_fisio"
+                key=f"salvar_edicao_fisio_{atendimento_id}"
             ):
                 cursor.execute("""
                     UPDATE fisioterapia
@@ -3264,7 +3322,7 @@ elif menu == "🩺 Fisioterapia":
 
             if col_excluir.button(
                 "Excluir atendimento",
-                key="excluir_fisio"
+                key=f"excluir_fisio_{atendimento_id}"
             ):
                 cursor.execute(
                     "DELETE FROM fisioterapia WHERE id = ?",
