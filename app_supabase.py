@@ -431,7 +431,8 @@ def calcular_data_renovacao(
             if aulas_contadas > quantidade_aulas:
                 return data_atual
 
-        data_atual += timedelta(days=1)# =========================
+        data_atual += timedelta(days=1)
+# =========================
 # MENU LATERAL COM BOTÕES
 # =========================
 
@@ -2469,7 +2470,9 @@ elif menu == "💰 Financeiro":
             )
 
             tabela_aluno = (
-                opcoes_alunos[aluno_escolhido]["tabela_preco"]
+                opcoes_alunos[
+                    aluno_escolhido
+                ]["tabela_preco"]
             )
 
             if tabela_aluno not in ["Antigo", "Novo"]:
@@ -2489,10 +2492,14 @@ elif menu == "💰 Financeiro":
                 key="financeiro_data"
             )
 
+            data_inicio_ciclo = st.date_input(
+                "Início do ciclo",
+                key="financeiro_inicio_ciclo"
+            )
+
             # =========================
             # PREVISÃO DE RENOVAÇÃO
             # =========================
-
             cursor.execute("""
                 SELECT turmas.dias
                 FROM alunos
@@ -2533,7 +2540,7 @@ elif menu == "💰 Financeiro":
                 quantidade_aulas_plano = 24
 
             data_renovacao = calcular_data_renovacao(
-                data_pagamento,
+                data_inicio_ciclo,
                 dias_turma_aluno,
                 quantidade_aulas_plano,
                 dias_fechados
@@ -2549,11 +2556,9 @@ elif menu == "💰 Financeiro":
                     "Não foi possível calcular a renovação. "
                     "Confira se o aluno está vinculado a uma turma."
                 )
-
             # =========================
             # VALORES DO PLANO
             # =========================
-
             data_reajuste = date(2027, 1, 1)
 
             if data_pagamento >= data_reajuste:
@@ -2590,7 +2595,10 @@ elif menu == "💰 Financeiro":
                 key="financeiro_forma"
             )
 
-            if forma_pagamento in ["Débito", "Crédito"]:
+            if forma_pagamento in [
+                "Débito",
+                "Crédito"
+            ]:
                 taxa_percentual = st.number_input(
                     "Taxa do cartão (%)",
                     min_value=0.0,
@@ -2602,12 +2610,15 @@ elif menu == "💰 Financeiro":
             else:
                 taxa_percentual = 0.0
 
-            valor_taxa = valor * (
-                taxa_percentual / 100
+            valor_taxa = (
+                valor
+                * taxa_percentual
+                / 100
             )
 
             valor_liquido = (
-                valor - valor_taxa
+                valor
+                - valor_taxa
             )
 
             col1, col2 = st.columns(2)
@@ -2641,6 +2652,7 @@ elif menu == "💰 Financeiro":
                         aluno_id,
                         valor,
                         data_pagamento,
+                        data_inicio_ciclo,
                         forma_pagamento,
                         status,
                         taxa_percentual,
@@ -2648,11 +2660,12 @@ elif menu == "💰 Financeiro":
                         valor_liquido,
                         plano
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     aluno_id_financeiro,
                     valor,
                     str(data_pagamento),
+                    str(data_inicio_ciclo),
                     forma_pagamento,
                     status_pagamento,
                     taxa_percentual,
@@ -2666,6 +2679,7 @@ elif menu == "💰 Financeiro":
                 st.success(
                     "Pagamento salvo com sucesso!"
                 )
+
     # =========================
     # ABA 2 - RESUMO / HISTÓRICO
     # =========================
@@ -2678,6 +2692,7 @@ elif menu == "💰 Financeiro":
                 alunos.nome,
                 financeiro.valor,
                 financeiro.data_pagamento,
+                financeiro.data_inicio_ciclo,
                 financeiro.forma_pagamento,
                 financeiro.status,
                 financeiro.valor_taxa,
@@ -2697,10 +2712,10 @@ elif menu == "💰 Financeiro":
         total_liquido = 0
 
         for pagamento in pagamentos:
-            if pagamento[5] == "Pago":
+            if pagamento[6] == "Pago":
                 total_recebido += pagamento[2]
-                total_taxas += pagamento[6] or 0
-                total_liquido += pagamento[7] or 0
+                total_taxas += pagamento[7] or 0
+                total_liquido += pagamento[8] or 0
 
             else:
                 total_pendente += pagamento[2]
@@ -2738,19 +2753,25 @@ elif menu == "💰 Financeiro":
         else:
             for pagamento in pagamentos:
                 plano_historico = (
-                    pagamento[8]
+                    pagamento[9]
                     or "Não informado"
+                )
+
+                inicio_ciclo_historico = (
+                    pagamento[4]
+                    or pagamento[3]
                 )
 
                 st.write(
                     f"**{pagamento[1]}** | "
                     f"Plano: {plano_historico} | "
                     f"Bruto: R$ {pagamento[2]:.2f} | "
-                    f"Taxa: R$ {(pagamento[6] or 0):.2f} | "
-                    f"Líquido: R$ {(pagamento[7] or 0):.2f} | "
-                    f"{pagamento[3]} | "
-                    f"{pagamento[4]} | "
-                    f"{pagamento[5]}"
+                    f"Taxa: R$ {(pagamento[7] or 0):.2f} | "
+                    f"Líquido: R$ {(pagamento[8] or 0):.2f} | "
+                    f"Pagamento: {pagamento[3]} | "
+                    f"Início do ciclo: {inicio_ciclo_historico} | "
+                    f"{pagamento[5]} | "
+                    f"{pagamento[6]}"
                 )
 
     # =========================
@@ -2767,6 +2788,7 @@ elif menu == "💰 Financeiro":
                 alunos.nome,
                 financeiro.valor,
                 financeiro.data_pagamento,
+                financeiro.data_inicio_ciclo,
                 financeiro.forma_pagamento,
                 financeiro.status,
                 financeiro.taxa_percentual,
@@ -2788,7 +2810,11 @@ elif menu == "💰 Financeiro":
 
         else:
             opcoes_lancamentos = {
-                f"ID {l[0]} - {l[1]} - R$ {l[2]:.2f}": l[0]
+                (
+                    f"ID {l[0]} - "
+                    f"{l[1]} - "
+                    f"R$ {l[2]:.2f}"
+                ): l[0]
                 for l in lancamentos
             }
 
@@ -2805,6 +2831,8 @@ elif menu == "💰 Financeiro":
             cursor.execute("""
                 SELECT
                     valor,
+                    data_pagamento,
+                    data_inicio_ciclo,
                     forma_pagamento,
                     status,
                     taxa_percentual,
@@ -2823,7 +2851,53 @@ elif menu == "💰 Financeiro":
                 value=float(
                     dados_financeiro[0] or 0
                 ),
-                key="editar_valor_financeiro"
+                key=(
+                    f"editar_valor_financeiro_"
+                    f"{lancamento_id}"
+                )
+            )
+
+            # =========================
+            # DATAS
+            # =========================
+            if dados_financeiro[1]:
+                data_pagamento_atual = (
+                    datetime.strptime(
+                        dados_financeiro[1],
+                        "%Y-%m-%d"
+                    ).date()
+                )
+            else:
+                data_pagamento_atual = date.today()
+
+            if dados_financeiro[2]:
+                data_inicio_ciclo_atual = (
+                    datetime.strptime(
+                        dados_financeiro[2],
+                        "%Y-%m-%d"
+                    ).date()
+                )
+            else:
+                data_inicio_ciclo_atual = (
+                    data_pagamento_atual
+                )
+
+            nova_data_pagamento = st.date_input(
+                "Data do pagamento",
+                value=data_pagamento_atual,
+                key=(
+                    f"editar_data_pagamento_"
+                    f"{lancamento_id}"
+                )
+            )
+
+            nova_data_inicio_ciclo = st.date_input(
+                "Início do ciclo",
+                value=data_inicio_ciclo_atual,
+                key=(
+                    f"editar_inicio_ciclo_"
+                    f"{lancamento_id}"
+                )
             )
 
             planos_edicao = [
@@ -2831,7 +2905,7 @@ elif menu == "💰 Financeiro":
                 "24 aulas"
             ]
 
-            plano_atual = dados_financeiro[4]
+            plano_atual = dados_financeiro[6]
 
             if plano_atual in planos_edicao:
                 indice_plano = planos_edicao.index(
@@ -2844,7 +2918,10 @@ elif menu == "💰 Financeiro":
                 "Plano",
                 planos_edicao,
                 index=indice_plano,
-                key="editar_plano_financeiro"
+                key=(
+                    f"editar_plano_financeiro_"
+                    f"{lancamento_id}"
+                )
             )
 
             formas_pagamento = [
@@ -2854,7 +2931,7 @@ elif menu == "💰 Financeiro":
                 "Crédito"
             ]
 
-            forma_atual = dados_financeiro[1]
+            forma_atual = dados_financeiro[3]
 
             if forma_atual in formas_pagamento:
                 indice_forma = formas_pagamento.index(
@@ -2867,7 +2944,10 @@ elif menu == "💰 Financeiro":
                 "Forma de pagamento",
                 formas_pagamento,
                 index=indice_forma,
-                key="editar_forma_financeiro"
+                key=(
+                    f"editar_forma_financeiro_"
+                    f"{lancamento_id}"
+                )
             )
 
             status_opcoes = [
@@ -2875,7 +2955,7 @@ elif menu == "💰 Financeiro":
                 "Pendente"
             ]
 
-            status_atual = dados_financeiro[2]
+            status_atual = dados_financeiro[4]
 
             if status_atual in status_opcoes:
                 indice_status = status_opcoes.index(
@@ -2888,18 +2968,27 @@ elif menu == "💰 Financeiro":
                 "Status",
                 status_opcoes,
                 index=indice_status,
-                key="editar_status_financeiro"
+                key=(
+                    f"editar_status_financeiro_"
+                    f"{lancamento_id}"
+                )
             )
 
-            if nova_forma in ["Débito", "Crédito"]:
+            if nova_forma in [
+                "Débito",
+                "Crédito"
+            ]:
                 nova_taxa = st.number_input(
                     "Taxa do cartão (%)",
                     min_value=0.0,
                     max_value=100.0,
                     value=float(
-                        dados_financeiro[3] or 0
+                        dados_financeiro[5] or 0
                     ),
-                    key="editar_taxa_financeiro"
+                    key=(
+                        f"editar_taxa_financeiro_"
+                        f"{lancamento_id}"
+                    )
                 )
 
             else:
@@ -2932,12 +3021,17 @@ elif menu == "💰 Financeiro":
 
             if col_salvar.button(
                 "Salvar alterações",
-                key="salvar_financeiro"
+                key=(
+                    f"salvar_financeiro_"
+                    f"{lancamento_id}"
+                )
             ):
                 cursor.execute("""
                     UPDATE financeiro
                     SET
                         valor = ?,
+                        data_pagamento = ?,
+                        data_inicio_ciclo = ?,
                         forma_pagamento = ?,
                         status = ?,
                         taxa_percentual = ?,
@@ -2947,6 +3041,8 @@ elif menu == "💰 Financeiro":
                     WHERE id = ?
                 """, (
                     novo_valor,
+                    str(nova_data_pagamento),
+                    str(nova_data_inicio_ciclo),
                     nova_forma,
                     novo_status,
                     nova_taxa,
@@ -2964,10 +3060,16 @@ elif menu == "💰 Financeiro":
 
             if col_excluir.button(
                 "Excluir lançamento",
-                key="excluir_financeiro"
+                key=(
+                    f"excluir_financeiro_"
+                    f"{lancamento_id}"
+                )
             ):
                 cursor.execute(
-                    "DELETE FROM financeiro WHERE id = ?",
+                    """
+                    DELETE FROM financeiro
+                    WHERE id = ?
+                    """,
                     (
                         lancamento_id,
                     )
@@ -2978,6 +3080,8 @@ elif menu == "💰 Financeiro":
                 st.success(
                     "Lançamento excluído com sucesso!"
                 )
+
+                st.rerun()
 elif menu == "🩺 Fisioterapia":
     st.title("Fisioterapia")
 
