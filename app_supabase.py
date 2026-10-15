@@ -2625,12 +2625,72 @@ elif menu == "✅ Presenças":
 
         else:
             for registro in historico_presencas:
-                st.write(
-                    f"**{registro[1]}** | "
-                    f"{registro[2]} - {registro[3]} | "
-                    f"{registro[4]} | "
-                    f"{registro[5]}"
-                )
+
+                col_info, col_excluir = st.columns([5, 1])
+
+                with col_info:
+                    st.write(
+                        f"**{registro[1]}** | "
+                        f"{registro[2]} - {registro[3]} | "
+                        f"{registro[4]} | "
+                        f"{registro[5]}"
+                    )
+
+                with col_excluir:
+                    if st.button(
+                        "🗑️ Excluir",
+                        key=f"excluir_presenca_{registro[0]}"
+                    ):
+                        cursor.execute("""
+                            SELECT
+                                aluno_id,
+                                turma_id,
+                                data,
+                                status
+                            FROM presencas
+                            WHERE id = ?
+                        """, (
+                            registro[0],
+                        ))
+
+                        dados_presenca = cursor.fetchone()
+
+                        if dados_presenca:
+                            aluno_id_excluir = dados_presenca[0]
+                            turma_id_excluir = dados_presenca[1]
+                            data_excluir = dados_presenca[2]
+                            status_excluir = dados_presenca[3]
+
+                            if status_excluir == "Reposição":
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET status = 'Agendada'
+                                    WHERE aluno_id = ?
+                                    AND data_reposicao = ?
+                                    AND turma_reposicao_id = ?
+                                    AND status = 'Realizada'
+                                """, (
+                                    aluno_id_excluir,
+                                    data_excluir,
+                                    turma_id_excluir
+                                ))
+
+                            cursor.execute("""
+                                DELETE FROM presencas
+                                WHERE id = ?
+                            """, (
+                                registro[0],
+                            ))
+
+                            conn.commit()
+
+                            st.success(
+                                "Presença excluída com sucesso!"
+                            )
+
+                            st.rerun()
+
+                st.divider()
 elif menu == "💰 Financeiro":
     st.title("Financeiro")
 
