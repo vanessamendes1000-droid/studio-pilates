@@ -1582,7 +1582,54 @@ elif menu == "👥 Alunos":
                     col3.metric(
                         "Aulas restantes",
                         aulas_restantes
-                    )
+                    )                    
+                    # =========================
+                    # REPOSIÇÕES REALIZADAS
+                    # =========================
+                    cursor.execute("""
+                        SELECT
+                            r.data_falta,
+                            r.data_reposicao,
+                            t.dias,
+                            t.horario
+                        FROM reposicoes r
+                        LEFT JOIN turmas t
+                            ON r.turma_reposicao_id = t.id
+                        WHERE r.aluno_id = ?
+                        AND r.status = 'Realizada'
+                        AND r.data_reposicao >= ?
+                        ORDER BY r.data_reposicao DESC
+                    """, (
+                        aluno_id_historico,
+                        data_inicio_ciclo_atual
+                    ))
+
+                    reposicoes_realizadas = cursor.fetchall()
+
+                    if len(reposicoes_realizadas) > 0:
+                        st.subheader(
+                            "🔄 Reposições realizadas neste ciclo"
+                        )
+
+                        for reposicao in reposicoes_realizadas:
+
+                            data_falta = reposicao[0]
+                            data_reposicao = reposicao[1]
+                            dias_reposicao = (
+                                reposicao[2]
+                                or "Turma não informada"
+                            )
+                            horario_reposicao = (
+                                reposicao[3]
+                                or ""
+                            )
+
+                            st.write(
+                                f"**Falta:** {data_falta} | "
+                                f"**Reposição:** {data_reposicao} | "
+                                f"**Turma:** {dias_reposicao} "
+                                f"{horario_reposicao}"
+                            )
 
                     if dias_turma_historico:
                         st.write(
@@ -4207,12 +4254,145 @@ elif menu == "🔄 Reposições":
 
             reposicao_id = opcoes_pendentes[
                 reposicao_escolhida
-            ]
+            ]            
+            # =========================
+            # VERIFICA REGRA DE REPOSIÇÕES
+            # =========================
+            cursor.execute("""
+                SELECT
+                    aluno_id,
+                    data_falta
+                FROM reposicoes
+                WHERE id = ?
+            """, (
+                reposicao_id,
+            ))
+
+            dados_reposicao_atual = cursor.fetchone()
+
+            inicio_ciclo_reposicao = None
+            fim_ciclo_reposicao = None
+            quantidade_outras_reposicoes = 0
+
+            if dados_reposicao_atual:
+                aluno_id_agendamento = dados_reposicao_atual[0]
+                data_falta_agendamento = dados_reposicao_atual[1]
+
+                cursor.execute("""
+                    SELECT
+                        COALESCE(
+                            data_inicio_ciclo,
+                            data_pagamento
+                        ),
+                        plano
+                    FROM financeiro
+                    WHERE aluno_id = ?
+                    AND COALESCE(
+                        data_inicio_ciclo,
+                        data_pagamento
+                    ) <= ?
+                    ORDER BY
+                        COALESCE(
+                            data_inicio_ciclo,
+                            data_pagamento
+                        ) DESC,
+                        id DESC
+                    LIMIT 1
+                """, (
+                    aluno_id_agendamento,
+                    data_falta_agendamento
+                ))
+
+                ciclo_reposicao = cursor.fetchone()
+
+                if ciclo_reposicao:
+                    inicio_ciclo_reposicao = datetime.strptime(
+                        ciclo_reposicao[0],
+                        "%Y-%m-%d"
+                    ).date()
+
+                    plano_reposicao = ciclo_reposicao[1] or "8 aulas"
+
+                    if "24" in str(plano_reposicao):
+                        aulas_ciclo_reposicao = 24
+                    else:
+                        aulas_ciclo_reposicao = 8
+
+                    cursor.execute("""
+                        SELECT turmas.dias
+                        FROM alunos
+                        LEFT JOIN turmas
+                            ON alunos.turma_id = turmas.id
+                        WHERE alunos.id = ?
+                    """, (
+                        aluno_id_agendamento,
+                    ))
+
+                    turma_ciclo = cursor.fetchone()
+
+                    if turma_ciclo:
+                        dias_ciclo_reposicao = turma_ciclo[0]
+
+                        cursor.execute("""
+                            SELECT data
+                            FROM dias_sem_aula
+                        """)
+
+                        dias_fechados_reposicao = set()
+
+                        for dia in cursor.fetchall():
+                            dias_fechados_reposicao.add(
+                                datetime.strptime(
+                                    dia[0],
+                                    "%Y-%m-%d"
+                                ).date()
+                            )
+
+                        fim_ciclo_reposicao = calcular_fim_ciclo(
+                            inicio_ciclo_reposicao,
+                            dias_ciclo_reposicao,
+                            aulas_ciclo_reposicao,
+                            dias_fechados_reposicao
+                        )
+
+                        if fim_ciclo_reposicao:
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM reposicoes
+                                WHERE aluno_id = ?
+                                AND id <> ?
+                                AND direito_reposicao = 'Sim'
+                                AND data_falta BETWEEN ? AND ?
+                            """, (
+                                aluno_id_agendamento,
+                                reposicao_id,
+                                str(inicio_ciclo_reposicao),
+                                str(fim_ciclo_reposicao)
+                            ))
+
+                            quantidade_outras_reposicoes = (
+                                cursor.fetchone()[0] or 0
+                            )
+
+                            if quantidade_outras_reposicoes >= 2:
+                                st.warning(
+                                    "⚠️ Este aluno já possui 2 reposições "
+                                    "neste ciclo. Este agendamento será "
+                                    "considerado uma exceção."
+                                )
 
             data_reposicao = st.date_input(
                 "Data da reposição",
                 key="agendar_data_reposicao"
             )
+            if (
+                fim_ciclo_reposicao
+                and data_reposicao > fim_ciclo_reposicao
+            ):
+                st.warning(
+                    "⚠️ A data escolhida está fora do ciclo do aluno. "
+                    "Este agendamento será considerado uma exceção."
+                )
 
             cursor.execute("""
                 SELECT
