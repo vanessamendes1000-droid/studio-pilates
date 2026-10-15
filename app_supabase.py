@@ -28,16 +28,32 @@ ssl_context = ssl.create_default_context(
 )
 
 ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
-conn = pg8000.dbapi.connect(
-    host=postgres["host"],
-    port=int(postgres["port"]),
-    database=postgres["dbname"],
-    user=postgres["user"],
-    password=postgres["password"],
-    ssl_context=ssl_context
-)
+def criar_conexao():
+    return pg8000.dbapi.connect(
+        host=postgres["host"],
+        port=int(postgres["port"]),
+        database=postgres["dbname"],
+        user=postgres["user"],
+        password=postgres["password"],
+        ssl_context=ssl_context
+    )
+
+if "conexao_banco" not in st.session_state:
+    st.session_state.conexao_banco = criar_conexao()
+conn = st.session_state.conexao_banco
+
+try:
+    cursor_teste = conn.cursor()
+    cursor_teste.execute("SELECT 1")
+    cursor_teste.fetchone()
+    cursor_teste.close()
+
+except Exception:
+    st.session_state.conexao_banco = criar_conexao()
+conn = st.session_state.conexao_banco
 
 class CursorCompat:
+
     def __init__(self, cursor):
         self.cursor = cursor
 
@@ -432,6 +448,32 @@ def calcular_data_renovacao(
                 return data_atual
 
         data_atual += timedelta(days=1)
+
+def calcular_fim_ciclo(
+    data_inicio,
+    texto_dias,
+    quantidade_aulas,
+    dias_sem_aula
+):
+    dias_turma = obter_dias_semana(texto_dias)
+
+    if not dias_turma:
+        return None
+
+    data_atual = data_inicio
+    aulas_contadas = 0
+
+    while True:
+        if (
+            data_atual.weekday() in dias_turma
+            and data_atual not in dias_sem_aula
+        ):
+            aulas_contadas += 1
+
+            if aulas_contadas == quantidade_aulas:
+                return data_atual
+
+        data_atual += timedelta(days=1)
 # =========================
 # MENU LATERAL COM BOTÕES
 # =========================
@@ -453,6 +495,10 @@ opcoes_menu = [
     "📊 Relatórios"
 ]
 
+def trocar_menu(opcao):
+    st.session_state.menu_ativo = opcao
+
+
 for opcao in opcoes_menu:
 
     if opcao == st.session_state.menu_ativo:
@@ -460,14 +506,14 @@ for opcao in opcoes_menu:
     else:
         tipo_botao = "secondary"
 
-    if st.sidebar.button(
+    st.sidebar.button(
         opcao,
         key=f"menu_{opcao}",
         use_container_width=True,
-        type=tipo_botao
-    ):
-        st.session_state.menu_ativo = opcao
-        st.rerun()
+        type=tipo_botao,
+        on_click=trocar_menu,
+        args=(opcao,)
+    )        
 st.sidebar.divider()
 
 menu = st.session_state.menu_ativo
@@ -1337,7 +1383,7 @@ elif menu == "👥 Alunos":
     # ABA 4 - HISTÓRICO DO ALUNO
     # =========================
     with aba_historico_aluno:
-        st.subheader("Histórico financeiro do aluno")
+        st.subheader("Histórico do aluno")
 
         cursor.execute("""
             SELECT id, nome
@@ -1356,7 +1402,10 @@ elif menu == "👥 Alunos":
                 for aluno in alunos_historico
             }
 
-            lista_historico = [""] + list(opcoes_historico.keys())
+            lista_historico = (
+                [""]
+                + list(opcoes_historico.keys())
+            )
 
             aluno_historico_selecionado = st.selectbox(
                 "Selecione o aluno",
@@ -1367,7 +1416,7 @@ elif menu == "👥 Alunos":
 
             if aluno_historico_selecionado == "":
                 st.info(
-                    "Digite ou selecione um aluno para consultar o histórico."
+                    "Selecione um aluno para consultar o histórico."
                 )
 
             else:
@@ -1375,16 +1424,70 @@ elif menu == "👥 Alunos":
                     aluno_historico_selecionado
                 ]
 
+                # =========================
+                # DADOS DA TURMA ATUAL
+                # =========================
                 cursor.execute("""
                     SELECT
+                        turmas.dias,
+                        turmas.horario
+                    FROM alunos
+                    LEFT JOIN turmas
+                        ON alunos.turma_id = turmas.id
+                    WHERE alunos.id = ?
+                """, (
+                    aluno_id_historico,
+                ))
+
+                turma_historico = cursor.fetchone()
+
+                if turma_historico:
+                    dias_turma_historico = turma_historico[0]
+                    horario_turma_historico = turma_historico[1]
+                else:
+                    dias_turma_historico = None
+                    horario_turma_historico = None
+
+                # =========================
+                # DIAS SEM AULA
+                # =========================
+                cursor.execute("""
+                    SELECT data
+                    FROM dias_sem_aula
+                """)
+
+                dias_sem_aula_banco = cursor.fetchall()
+
+                dias_sem_aula_historico = set()
+
+                for dia in dias_sem_aula_banco:
+                    dias_sem_aula_historico.add(
+                        datetime.strptime(
+                            dia[0],
+                            "%Y-%m-%d"
+                        ).date()
+                    )
+
+                # =========================
+                # PAGAMENTOS / CICLOS
+                # =========================
+                cursor.execute("""
+                    SELECT
+                        id,
                         valor,
                         data_pagamento,
+                        data_inicio_ciclo,
                         forma_pagamento,
                         status,
                         plano
                     FROM financeiro
                     WHERE aluno_id = ?
-                    ORDER BY data_pagamento DESC, id DESC
+                    ORDER BY
+                        COALESCE(
+                            data_inicio_ciclo,
+                            data_pagamento
+                        ) DESC,
+                        id DESC
                 """, (
                     aluno_id_historico,
                 ))
@@ -1393,20 +1496,29 @@ elif menu == "👥 Alunos":
 
                 if len(pagamentos_aluno) == 0:
                     st.warning(
-                        "Este aluno ainda não possui pagamentos registrados."
+                        "Este aluno ainda não possui ciclos registrados."
                     )
 
                 else:
+                    # =========================
+                    # CICLO ATUAL
+                    # =========================
                     ultimo_pagamento = pagamentos_aluno[0]
 
-                    plano_atual = ultimo_pagamento[4] or ""
+                    plano_atual = (
+                        ultimo_pagamento[6]
+                        or "8 aulas"
+                    )
 
                     if "24" in str(plano_atual):
                         total_aulas_plano = 24
                     else:
                         total_aulas_plano = 8
 
-                    data_inicio_ciclo = ultimo_pagamento[1]
+                    data_inicio_ciclo_atual = (
+                        ultimo_pagamento[3]
+                        or ultimo_pagamento[2]
+                    )
 
                     cursor.execute("""
                         SELECT COUNT(*)
@@ -1437,11 +1549,12 @@ elif menu == "👥 Alunos":
                         )
                     """, (
                         aluno_id_historico,
-                        data_inicio_ciclo
+                        data_inicio_ciclo_atual
                     ))
 
                     aulas_utilizadas = (
-                        cursor.fetchone()[0] or 0
+                        cursor.fetchone()[0]
+                        or 0
                     )
 
                     aulas_restantes = (
@@ -1458,58 +1571,156 @@ elif menu == "👥 Alunos":
 
                     col1.metric(
                         "Plano",
-                        ultimo_pagamento[4] or "Não informado"
+                        plano_atual
                     )
 
                     col2.metric(
-                        "Valor",
-                        f"R$ {ultimo_pagamento[0]:.2f}"
-                    )
-
-                    col3.metric(
-                        "Status",
-                        ultimo_pagamento[3]
-                    )
-                    col4, col5, col6 = st.columns(3)
-
-                    col4.metric(
-                        "Aulas do plano",
-                        total_aulas_plano
-                    )
-
-                    col5.metric(
                         "Aulas utilizadas",
                         aulas_utilizadas
                     )
 
-                    col6.metric(
+                    col3.metric(
                         "Aulas restantes",
                         aulas_restantes
                     )
-                    st.write(
-                        f"**Data do pagamento:** "
-                        f"{ultimo_pagamento[1]}"
-                    )
 
-                    st.write(
-                        f"**Forma de pagamento:** "
-                        f"{ultimo_pagamento[2]}"
-                    )
+                    if dias_turma_historico:
+                        st.write(
+                            f"**Turma atual:** "
+                            f"{dias_turma_historico} - "
+                            f"{horario_turma_historico}"
+                        )
 
                     st.divider()
 
-                    st.subheader("📅 Histórico de pagamentos")
+                    # =========================
+                    # TODOS OS CICLOS
+                    # =========================
+                    st.subheader("📚 Histórico de ciclos")
 
-                    for pagamento in pagamentos_aluno:
-                        st.write(
-                            f"**{pagamento[1]}** | "
-                            f"Plano: {pagamento[4] or 'Não informado'} | "
-                            f"Valor: R$ {pagamento[0]:.2f} | "
-                            f"{pagamento[2]} | "
-                            f"Status: {pagamento[3]}"
+                    for numero, pagamento in enumerate(
+                        pagamentos_aluno,
+                        start=1
+                    ):
+                        valor_historico = pagamento[1]
+
+                        data_pagamento_historico = (
+                            pagamento[2]
                         )
 
-                        st.divider()
+                        inicio_ciclo_historico = (
+                            pagamento[3]
+                            or pagamento[2]
+                        )
+
+                        forma_historico = (
+                            pagamento[4]
+                            or "Não informado"
+                        )
+
+                        status_historico = (
+                            pagamento[5]
+                            or "Não informado"
+                        )
+
+                        plano_historico = (
+                            pagamento[6]
+                            or "8 aulas"
+                        )
+
+                        if "24" in str(plano_historico):
+                            quantidade_aulas_historico = 24
+                        else:
+                            quantidade_aulas_historico = 8
+
+                        fim_ciclo = None
+                        proxima_renovacao = None
+
+                        if (
+                            inicio_ciclo_historico
+                            and dias_turma_historico
+                        ):
+                            inicio_data = datetime.strptime(
+                                inicio_ciclo_historico,
+                                "%Y-%m-%d"
+                            ).date()
+
+                            fim_ciclo = calcular_fim_ciclo(
+                                inicio_data,
+                                dias_turma_historico,
+                                quantidade_aulas_historico,
+                                dias_sem_aula_historico
+                            )
+
+                            proxima_renovacao = (
+                                calcular_data_renovacao(
+                                    inicio_data,
+                                    dias_turma_historico,
+                                    quantidade_aulas_historico,
+                                    dias_sem_aula_historico
+                                )
+                            )
+
+                        data_pagamento_formatada = (
+                            datetime.strptime(
+                                data_pagamento_historico,
+                                "%Y-%m-%d"
+                            ).strftime("%d/%m/%Y")
+                            if data_pagamento_historico
+                            else "Não informada"
+                        )
+
+                        inicio_formatado = (
+                            datetime.strptime(
+                                inicio_ciclo_historico,
+                                "%Y-%m-%d"
+                            ).strftime("%d/%m/%Y")
+                            if inicio_ciclo_historico
+                            else "Não informado"
+                        )
+
+                        with st.container(border=True):
+                            st.markdown(
+                                f"### Ciclo {numero} — "
+                                f"{plano_historico}"
+                            )
+
+                            st.write(
+                                f"**Pagamento:** "
+                                f"{data_pagamento_formatada}"
+                            )
+
+                            st.write(
+                                f"**Início do ciclo:** "
+                                f"{inicio_formatado}"
+                            )
+
+                            if fim_ciclo:
+                                st.write(
+                                    f"**Fim do ciclo:** "
+                                    f"{fim_ciclo.strftime('%d/%m/%Y')}"
+                                )
+
+                            if proxima_renovacao:
+                                st.write(
+                                    f"**Próxima renovação:** "
+                                    f"{proxima_renovacao.strftime('%d/%m/%Y')}"
+                                )
+
+                            st.write(
+                                f"**Valor:** "
+                                f"R$ {valor_historico:.2f}"
+                            )
+
+                            st.write(
+                                f"**Forma de pagamento:** "
+                                f"{forma_historico}"
+                            )
+
+                            st.write(
+                                f"**Status:** "
+                                f"{status_historico}"
+                            )
 elif menu == "📅 Turmas":
     st.title("Turmas")
 
