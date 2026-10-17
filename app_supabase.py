@@ -54,9 +54,9 @@ conn = st.session_state.conexao_banco
 
 class CursorCompat:
 
-    def __init__(self, cursor, conexao):
-        self.cursor = cursor
+    def __init__(self, conexao):
         self.conexao = conexao
+        self.cursor = None
 
     def execute(self, sql, params=None):
         global conn
@@ -64,6 +64,9 @@ class CursorCompat:
         sql = sql.replace("?", "%s")
 
         try:
+            # Cria um cursor novo para cada consulta
+            self.cursor = self.conexao.cursor()
+
             if params is None:
                 return self.cursor.execute(sql)
 
@@ -73,8 +76,7 @@ class CursorCompat:
             )
 
         except pg8000.dbapi.InterfaceError:
-            # A conexão caiu ou foi fechada.
-            # Cria uma conexão nova automaticamente.
+            # Reconecta caso a conexão tenha fechado
             try:
                 self.conexao.close()
             except Exception:
@@ -87,11 +89,12 @@ class CursorCompat:
             )
 
             conn = nova_conexao
-
             self.conexao = nova_conexao
-            self.cursor = nova_conexao.cursor()
 
-            # Tenta executar novamente
+            self.cursor = (
+                nova_conexao.cursor()
+            )
+
             if params is None:
                 return self.cursor.execute(sql)
 
@@ -109,24 +112,31 @@ class CursorCompat:
                 except Exception:
                     pass
 
-                if "conexao_banco" in st.session_state:
-                    del st.session_state[
-                        "conexao_banco"
-                    ]
+                nova_conexao = criar_conexao()
+
+                st.session_state.conexao_banco = (
+                    nova_conexao
+                )
+
+                conn = nova_conexao
+                self.conexao = nova_conexao
 
             raise
 
     def fetchone(self):
+        if self.cursor is None:
+            return None
+
         return self.cursor.fetchone()
 
     def fetchall(self):
+        if self.cursor is None:
+            return []
+
         return self.cursor.fetchall()
 
 
-cursor = CursorCompat(
-    conn.cursor(),
-    conn
-)
+cursor = CursorCompat(conn)
 st.set_page_config(
     page_title="Studio de Pilates",
     page_icon="🧘",
@@ -5474,7 +5484,136 @@ elif menu == "📊 Relatórios":
         col9.metric(
             "Despesas registradas",
             qtd_despesas
-        )
+        )         
+        st.divider()
+        st.subheader("💳 Recebimentos por forma de pagamento")
+
+        # =========================
+        # PILATES POR FORMA
+        # =========================
+        st.markdown("### Pilates")
+
+        cursor.execute("""
+            SELECT
+                forma_pagamento,
+                COUNT(*),
+                SUM(valor),
+                SUM(valor_taxa),
+                SUM(valor_liquido)
+            FROM financeiro
+            WHERE status = 'Pago'
+            AND data_pagamento BETWEEN ? AND ?
+            GROUP BY forma_pagamento
+            ORDER BY forma_pagamento
+        """, (
+            data_inicio,
+            data_fim
+        ))
+
+        formas_pilates = cursor.fetchall()
+
+        if len(formas_pilates) == 0:
+            st.info(
+                "Nenhum pagamento de Pilates nesse período."
+            )
+
+        else:
+            colunas = st.columns(4)
+
+            for indice, item in enumerate(formas_pilates):
+                forma = item[0] or "Não informado"
+                quantidade = item[1] or 0
+                bruto = item[2] or 0
+                taxas = item[3] or 0
+                liquido = item[4] or 0
+
+                coluna = colunas[indice % 4]
+
+                with coluna:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"### {forma}"
+                        )
+
+                        st.write(
+                            f"**Pagamentos:** {quantidade}"
+                        )
+
+                        st.write(
+                            f"**Bruto:** R$ {bruto:.2f}"
+                        )
+
+                        st.write(
+                            f"**Taxas:** R$ {taxas:.2f}"
+                        )
+
+                        st.write(
+                            f"**Líquido:** R$ {liquido:.2f}"
+                        )
+
+        st.divider()
+
+        # =========================
+        # FISIOTERAPIA POR FORMA
+        # =========================
+        st.markdown("### Fisioterapia")
+
+        cursor.execute("""
+            SELECT
+                forma_pagamento,
+                COUNT(*),
+                SUM(valor),
+                SUM(valor_taxa),
+                SUM(valor_liquido)
+            FROM fisioterapia
+            WHERE data BETWEEN ? AND ?
+            GROUP BY forma_pagamento
+            ORDER BY forma_pagamento
+        """, (
+            data_inicio,
+            data_fim
+        ))
+
+        formas_fisio = cursor.fetchall()
+
+        if len(formas_fisio) == 0:
+            st.info(
+                "Nenhum pagamento de Fisioterapia nesse período."
+            )
+
+        else:
+            colunas = st.columns(4)
+
+            for indice, item in enumerate(formas_fisio):
+                forma = item[0] or "Não informado"
+                quantidade = item[1] or 0
+                bruto = item[2] or 0
+                taxas = item[3] or 0
+                liquido = item[4] or 0
+
+                coluna = colunas[indice % 4]
+
+                with coluna:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"### {forma}"
+                        )
+
+                        st.write(
+                            f"**Atendimentos:** {quantidade}"
+                        )
+
+                        st.write(
+                            f"**Bruto:** R$ {bruto:.2f}"
+                        )
+
+                        st.write(
+                            f"**Taxas:** R$ {taxas:.2f}"
+                        )
+
+                        st.write(
+                            f"**Líquido:** R$ {liquido:.2f}"
+                        )
 
     # =========================
     # ABA 2 - PILATES
@@ -5503,6 +5642,87 @@ elif menu == "📊 Relatórios":
             "Pendente",
             f"R$ {pendente_pilates:.2f}"
         )
+
+        st.divider()
+
+        # =========================
+        # RESUMO POR FORMA DE PAGAMENTO
+        # =========================
+        st.subheader(
+            "💳 Recebimentos por forma de pagamento"
+        )
+
+        cursor.execute("""
+            SELECT
+                forma_pagamento,
+                COUNT(*),
+                SUM(valor),
+                SUM(valor_taxa),
+                SUM(valor_liquido)
+            FROM financeiro
+            WHERE status = 'Pago'
+            AND data_pagamento BETWEEN ? AND ?
+            GROUP BY forma_pagamento
+            ORDER BY forma_pagamento
+        """, (
+            data_inicio,
+            data_fim
+        ))
+
+        pagamentos_por_forma = cursor.fetchall()
+
+        if len(pagamentos_por_forma) == 0:
+            st.info(
+                "Nenhum pagamento recebido nesse período."
+            )
+
+        else:
+            colunas_formas = st.columns(4)
+
+            for indice, forma in enumerate(
+                pagamentos_por_forma
+            ):
+                forma_pagamento = (
+                    forma[0]
+                    or "Não informado"
+                )
+
+                quantidade = forma[1] or 0
+                bruto = forma[2] or 0
+                taxas = forma[3] or 0
+                liquido = forma[4] or 0
+
+                coluna = colunas_formas[
+                    indice % 4
+                ]
+
+                with coluna:
+                    with st.container(
+                        border=True
+                    ):
+                        st.markdown(
+                            f"### {forma_pagamento}"
+                        )
+
+                        st.metric(
+                            "Pagamentos",
+                            quantidade
+                        )
+
+                        st.write(
+                            f"**Bruto:** "
+                            f"R$ {bruto:.2f}"
+                        )
+
+                        st.write(
+                            f"**Taxas:** "
+                            f"R$ {taxas:.2f}"
+                        )
+
+                        st.write(
+                            f"**Líquido:** "
+                            f"R$ {liquido:.2f}"
+                        )
 
         st.divider()
         st.subheader("Pagamentos do período")
