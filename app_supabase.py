@@ -5050,7 +5050,7 @@ elif menu == "👨‍🏫 Instrutores":
                         AND r.direito_reposicao = 'Sim'
                         AND r.status IN (
                             'Pendente',
-                             '
+                            'Agendada',
                             'Realizada'
                         )
                     )
