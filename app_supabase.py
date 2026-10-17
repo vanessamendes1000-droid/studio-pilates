@@ -59,13 +59,46 @@ class CursorCompat:
         self.conexao = conexao
 
     def execute(self, sql, params=None):
+        global conn
+
         sql = sql.replace("?", "%s")
 
         try:
             if params is None:
                 return self.cursor.execute(sql)
 
-            return self.cursor.execute(sql, params)
+            return self.cursor.execute(
+                sql,
+                params
+            )
+
+        except pg8000.dbapi.InterfaceError:
+            # A conexão caiu ou foi fechada.
+            # Cria uma conexão nova automaticamente.
+            try:
+                self.conexao.close()
+            except Exception:
+                pass
+
+            nova_conexao = criar_conexao()
+
+            st.session_state.conexao_banco = (
+                nova_conexao
+            )
+
+            conn = nova_conexao
+
+            self.conexao = nova_conexao
+            self.cursor = nova_conexao.cursor()
+
+            # Tenta executar novamente
+            if params is None:
+                return self.cursor.execute(sql)
+
+            return self.cursor.execute(
+                sql,
+                params
+            )
 
         except Exception:
             try:
@@ -77,7 +110,9 @@ class CursorCompat:
                     pass
 
                 if "conexao_banco" in st.session_state:
-                    del st.session_state["conexao_banco"]
+                    del st.session_state[
+                        "conexao_banco"
+                    ]
 
             raise
 
@@ -3135,7 +3170,9 @@ elif menu == "💰 Financeiro":
             )
 
             aluno_id_financeiro = (
-                opcoes_alunos[aluno_escolhido]["id"]
+                opcoes_alunos[
+                    aluno_escolhido
+                ]["id"]
             )
 
             tabela_aluno = (
@@ -3144,9 +3181,28 @@ elif menu == "💰 Financeiro":
                 ]["tabela_preco"]
             )
 
-            if tabela_aluno not in ["Antigo", "Novo"]:
+            if tabela_aluno not in [
+                "Antigo",
+                "Novo"
+            ]:
                 tabela_aluno = "Antigo"
 
+            tabela_escolhida = st.selectbox(
+                "Tabela de preço",
+                [
+                    "Antigo",
+                    "Novo"
+                ],
+                index=(
+                    0
+                    if tabela_aluno == "Antigo"
+                    else 1
+                ),
+                key=(
+                    f"financeiro_tabela_preco_"
+                    f"{aluno_id_financeiro}"
+                )
+            )
             plano = st.selectbox(
                 "Plano",
                 [
@@ -3165,7 +3221,6 @@ elif menu == "💰 Financeiro":
                 "Início do ciclo",
                 key="financeiro_inicio_ciclo"
             )
-
             # =========================
             # PREVISÃO DE RENOVAÇÃO
             # =========================
@@ -3233,7 +3288,7 @@ elif menu == "💰 Financeiro":
             if data_pagamento >= data_reajuste:
                 tabela_usada = "Novo"
             else:
-                tabela_usada = tabela_aluno
+                tabela_usada = tabela_escolhida
 
             if plano == "8 aulas":
                 if tabela_usada == "Antigo":
