@@ -1866,11 +1866,21 @@ elif menu == "👥 Alunos":
                         AND (
                             p.status = 'Presente'
 
-                            OR p.status = 'Reposição'
+                            OR (
+                                p.status = 'Reposição'
+                                AND EXISTS (
+                                    SELECT 1
+                                    FROM reposicoes r
+                                    WHERE r.aluno_id = p.aluno_id
+                                    AND r.data_reposicao = p.data
+                                    AND r.turma_reposicao_id = p.turma_id
+                                    AND r.status = 'Realizada'
+                                    AND r.data_falta >= ?
+                                )
+                            )
 
                             OR (
                                 p.status = 'Falta'
-
                                 AND NOT EXISTS (
                                     SELECT 1
                                     FROM reposicoes r
@@ -1887,9 +1897,9 @@ elif menu == "👥 Alunos":
                         )
                     """, (
                         aluno_id_historico,
+                        data_inicio_ciclo_atual,
                         data_inicio_ciclo_atual
                     ))
-
                     aulas_utilizadas = (
                         cursor.fetchone()[0]
                         or 0
@@ -1967,7 +1977,8 @@ elif menu == "👥 Alunos":
                             r.data_falta,
                             r.data_reposicao,
                             t.dias,
-                            t.horario
+                            t.horario,
+                            r.observacao
                         FROM reposicoes r
                         LEFT JOIN turmas t
                             ON r.turma_reposicao_id = t.id
@@ -2000,12 +2011,22 @@ elif menu == "👥 Alunos":
                                 or ""
                             )
 
+                            observacao_reposicao = (
+                                reposicao[4]
+                                or ""
+                            )
+
                             st.write(
                                 f"**Falta:** {data_falta} | "
                                 f"**Reposição:** {data_reposicao} | "
                                 f"**Turma:** {dias_reposicao} "
                                 f"{horario_reposicao}"
                             )
+
+                            if observacao_reposicao:
+                                st.caption(
+                                    f"Observação: {observacao_reposicao}"
+                                )
 
                     if dias_turma_historico:
                         st.write(
@@ -4943,7 +4964,16 @@ elif menu == "🔄 Reposições":
 
             reposicao_id = opcoes_pendentes[
                 reposicao_escolhida
-            ]            
+            ]
+
+            observacao = st.text_area(
+                "Observação da reposição",
+                placeholder=(
+                    "Ex.: reposição referente ao ciclo anterior, "
+                    "viagem, mal-estar..."
+                ),
+                key="reposicao_observacao"
+            )
             # =========================
             # VERIFICA REGRA DE REPOSIÇÕES
             # =========================
@@ -5132,11 +5162,13 @@ elif menu == "🔄 Reposições":
                         SET
                             data_reposicao = ?,
                             turma_reposicao_id = ?,
+                            observacao = ?,
                             status = 'Agendada'
                         WHERE id = ?
                     """, (
                         str(data_reposicao),
                         turma_reposicao_id,
+                        observacao,
                         reposicao_id
                     ))
 
@@ -5164,7 +5196,8 @@ elif menu == "🔄 Reposições":
                 r.data_reposicao,
                 r.status,
                 t.dias,
-                t.horario
+                t.horario,
+                r.observacao
             FROM reposicoes r
             INNER JOIN alunos a
                 ON r.aluno_id = a.id
@@ -5188,10 +5221,42 @@ elif menu == "🔄 Reposições":
 
                 st.write(
                     f"Falta: {reposicao[2]} | "
-                    f"Direito: {reposicao[4]} | "
-                    f"Status: {reposicao[6]}"
+                    f"Direito: {reposicao[4]}"
                 )
 
+                status_reposicao = reposicao[6]
+
+                if status_reposicao == "Pendente":
+                    st.markdown(
+                        "<span style='color:#c62828; "
+                        "font-weight:700;'>"
+                        "🔴 Pendente"
+                        "</span>",
+                        unsafe_allow_html=True
+                    )
+
+                elif status_reposicao == "Realizada":
+                    st.markdown(
+                        "<span style='color:#2e7d32; "
+                        "font-weight:700;'>"
+                        "🟢 Realizada"
+                        "</span>",
+                        unsafe_allow_html=True
+                    )
+
+                elif status_reposicao == "Agendada":
+                    st.markdown(
+                        "<span style='color:#ef6c00; "
+                        "font-weight:700;'>"
+                        "🟠 Agendada"
+                        "</span>",
+                        unsafe_allow_html=True
+                    )
+
+                else:
+                    st.write(
+                        f"Status: {status_reposicao}"
+                    )
                 if reposicao[5]:
                     st.write(
                         f"📅 Reposição: "
@@ -5209,6 +5274,12 @@ elif menu == "🔄 Reposições":
                     st.caption(
                         f"Motivo: {reposicao[3]}"
                     )
+
+                if reposicao[9]:
+                    st.caption(
+                        f"Observação: {reposicao[9]}"
+                    )
+
                 if st.button(
                     "🗑️ Excluir reposição",
                     key=f"excluir_reposicao_{reposicao[0]}"
