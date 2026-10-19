@@ -3040,100 +3040,159 @@ elif menu == "✅ Presenças":
     with aba_historico:
         st.subheader("Histórico de presenças")
 
+        # =========================
+        # HORÁRIOS DISPONÍVEIS
+        # =========================
         cursor.execute("""
-            SELECT
-                p.id,
-                a.nome,
-                t.dias,
-                t.horario,
-                p.data,
-                p.status
-            FROM presencas p
-            INNER JOIN alunos a
-                ON p.aluno_id = a.id
-            INNER JOIN turmas t
-                ON p.turma_id = t.id
-            ORDER BY
-                p.data DESC,
-                t.horario,
-                a.nome
+            SELECT DISTINCT horario
+            FROM turmas
+            WHERE horario IS NOT NULL
+            ORDER BY horario
         """)
 
-        historico_presencas = cursor.fetchall()
+        horarios_banco = cursor.fetchall()
 
-        if len(historico_presencas) == 0:
-            st.info(
-                "Nenhuma presença registrada."
+        horarios = [
+            horario[0]
+            for horario in horarios_banco
+            if horario[0]
+        ]
+
+        opcoes_horarios = (
+            ["Todos os horários"]
+            + horarios
+        )
+
+        horario_selecionado = st.selectbox(
+            "Buscar por horário",
+            opcoes_horarios,
+            key="historico_presenca_horario"
+        )
+
+        # =========================
+        # FILTRO POR DATA
+        # =========================
+        filtro_data = st.selectbox(
+            "Buscar por data",
+            [
+                "Todas as datas",
+                "Escolher uma data"
+            ],
+            key="historico_filtro_data"
+        )
+
+        if filtro_data == "Escolher uma data":
+            data_selecionada = st.date_input(
+                "Data",
+                key="historico_presenca_data"
             )
+        else:
+            data_selecionada = None
+
+        # =========================
+        # CONSULTA DO HISTÓRICO
+        # =========================
+        if (
+            horario_selecionado == "Todos os horários"
+            and data_selecionada is None
+        ):
+
+            cursor.execute("""
+                SELECT
+                    p.id,
+                    a.nome,
+                    t.dias,
+                    t.horario,
+                    p.data,
+                    p.status
+                FROM presencas p
+                INNER JOIN alunos a
+                    ON p.aluno_id = a.id
+                INNER JOIN turmas t
+                    ON p.turma_id = t.id
+                ORDER BY
+                    p.data DESC,
+                    t.horario,
+                    a.nome
+            """)
+
+        elif (
+            horario_selecionado != "Todos os horários"
+            and data_selecionada is None
+        ):
+
+            cursor.execute("""
+                SELECT
+                    p.id,
+                    a.nome,
+                    t.dias,
+                    t.horario,
+                    p.data,
+                    p.status
+                FROM presencas p
+                INNER JOIN alunos a
+                    ON p.aluno_id = a.id
+                INNER JOIN turmas t
+                    ON p.turma_id = t.id
+                WHERE t.horario = ?
+                ORDER BY
+                    p.data DESC,
+                    a.nome
+            """, (
+                horario_selecionado,
+            ))
+
+        elif (
+            horario_selecionado == "Todos os horários"
+            and data_selecionada is not None
+        ):
+
+            cursor.execute("""
+                SELECT
+                    p.id,
+                    a.nome,
+                    t.dias,
+                    t.horario,
+                    p.data,
+                    p.status
+                FROM presencas p
+                INNER JOIN alunos a
+                    ON p.aluno_id = a.id
+                INNER JOIN turmas t
+                    ON p.turma_id = t.id
+                WHERE p.data = ?
+                ORDER BY
+                    t.horario,
+                    a.nome
+            """, (
+                str(data_selecionada),
+            ))
 
         else:
-            for registro in historico_presencas:
 
-                col_info, col_excluir = st.columns([5, 1])
+            cursor.execute("""
+                SELECT
+                    p.id,
+                    a.nome,
+                    t.dias,
+                    t.horario,
+                    p.data,
+                    p.status
+                FROM presencas p
+                INNER JOIN alunos a
+                    ON p.aluno_id = a.id
+                INNER JOIN turmas t
+                    ON p.turma_id = t.id
+                WHERE t.horario = ?
+                AND p.data = ?
+                ORDER BY
+                    a.nome
+            """, (
+                horario_selecionado,
+                str(data_selecionada)
+            ))
 
-                with col_info:
-                    st.write(
-                        f"**{registro[1]}** | "
-                        f"{registro[2]} - {registro[3]} | "
-                        f"{registro[4]} | "
-                        f"{registro[5]}"
-                    )
-
-                with col_excluir:
-                    if st.button(
-                        "🗑️ Excluir",
-                        key=f"excluir_presenca_{registro[0]}"
-                    ):
-                        cursor.execute("""
-                            SELECT
-                                aluno_id,
-                                turma_id,
-                                data,
-                                status
-                            FROM presencas
-                            WHERE id = ?
-                        """, (
-                            registro[0],
-                        ))
-
-                        dados_presenca = cursor.fetchone()
-
-                        if dados_presenca:
-                            aluno_id_excluir = dados_presenca[0]
-                            turma_id_excluir = dados_presenca[1]
-                            data_excluir = dados_presenca[2]
-                            status_excluir = dados_presenca[3]
-
-                            if status_excluir == "Reposição":
-                                cursor.execute("""
-                                    UPDATE reposicoes
-                                    SET status = 'Agendada'
-                                    WHERE aluno_id = ?
-                                    AND data_reposicao = ?
-                                    AND turma_reposicao_id = ?
-                                    AND status = 'Realizada'
-                                """, (
-                                    aluno_id_excluir,
-                                    data_excluir,
-                                    turma_id_excluir
-                                ))
-
-                            cursor.execute("""
-                                DELETE FROM presencas
-                                WHERE id = ?
-                            """, (
-                                registro[0],
-                            ))
-
-                            conn.commit()
-
-                            st.success(
-                                "Presença excluída com sucesso!"
-                            )
-
-                            st.rerun()
-
-                st.divider()
+        historico_presencas = cursor.fetchall()
 elif menu == "💰 Financeiro":
     st.title("Financeiro")
 
