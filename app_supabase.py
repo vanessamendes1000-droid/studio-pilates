@@ -3041,35 +3041,38 @@ elif menu == "✅ Presenças":
         st.subheader("Histórico de presenças")
 
         # =========================
-        # HORÁRIOS DISPONÍVEIS
+        # TURMAS / HORÁRIOS
         # =========================
         cursor.execute("""
-            SELECT DISTINCT horario
+            SELECT
+                id,
+                dias,
+                horario
             FROM turmas
-            WHERE horario IS NOT NULL
-            ORDER BY horario
+            ORDER BY
+                horario,
+                dias
         """)
 
-        horarios_banco = cursor.fetchall()
+        turmas_historico = cursor.fetchall()
 
-        horarios = [
-            horario[0]
-            for horario in horarios_banco
-            if horario[0]
-        ]
+        opcoes_turmas_historico = {
+            f"{turma[1]} - {turma[2]}": turma[0]
+            for turma in turmas_historico
+        }
 
-        opcoes_horarios = (
-            ["Todos os horários"]
-            + horarios
+        lista_turmas_historico = (
+            ["Todas as turmas"]
+            + list(opcoes_turmas_historico.keys())
         )
 
         # =========================
         # VALORES INICIAIS DOS FILTROS
         # =========================
-        if "filtro_horario_aplicado" not in st.session_state:
+        if "filtro_turma_aplicado" not in st.session_state:
             st.session_state[
-                "filtro_horario_aplicado"
-            ] = "Todos os horários"
+                "filtro_turma_aplicado"
+            ] = None
 
         if "filtro_data_aplicado" not in st.session_state:
             st.session_state[
@@ -3079,10 +3082,10 @@ elif menu == "✅ Presenças":
         # =========================
         # CAMPOS DE BUSCA
         # =========================
-        horario_selecionado = st.selectbox(
-            "Buscar por horário",
-            opcoes_horarios,
-            key="historico_presenca_horario"
+        turma_historico_selecionada = st.selectbox(
+            "Buscar por turma / horário",
+            lista_turmas_historico,
+            key="historico_presenca_turma"
         )
 
         filtro_data = st.selectbox(
@@ -3109,16 +3112,27 @@ elif menu == "✅ Presenças":
             "🔎 Buscar",
             key="buscar_historico_presencas"
         ):
-            st.session_state[
-                "filtro_horario_aplicado"
-            ] = horario_selecionado
+
+            if (
+                turma_historico_selecionada
+                == "Todas as turmas"
+            ):
+                st.session_state[
+                    "filtro_turma_aplicado"
+                ] = None
+            else:
+                st.session_state[
+                    "filtro_turma_aplicado"
+                ] = opcoes_turmas_historico[
+                    turma_historico_selecionada
+                ]
 
             st.session_state[
                 "filtro_data_aplicado"
             ] = data_selecionada
 
-        horario_aplicado = st.session_state[
-            "filtro_horario_aplicado"
+        turma_id_aplicada = st.session_state[
+            "filtro_turma_aplicado"
         ]
 
         data_aplicada = st.session_state[
@@ -3129,9 +3143,8 @@ elif menu == "✅ Presenças":
         # CONSULTA DO HISTÓRICO
         # =========================
 
-        # TODOS OS HORÁRIOS + TODAS AS DATAS
         if (
-            horario_aplicado == "Todos os horários"
+            turma_id_aplicada is None
             and data_aplicada is None
         ):
             cursor.execute("""
@@ -3150,12 +3163,12 @@ elif menu == "✅ Presenças":
                 ORDER BY
                     p.data DESC,
                     t.horario,
+                    t.dias,
                     a.nome
             """)
 
-        # HORÁRIO ESPECÍFICO + TODAS AS DATAS
         elif (
-            horario_aplicado != "Todos os horários"
+            turma_id_aplicada is not None
             and data_aplicada is None
         ):
             cursor.execute("""
@@ -3171,17 +3184,16 @@ elif menu == "✅ Presenças":
                     ON p.aluno_id = a.id
                 INNER JOIN turmas t
                     ON p.turma_id = t.id
-                WHERE t.horario = ?
+                WHERE p.turma_id = ?
                 ORDER BY
                     p.data DESC,
                     a.nome
             """, (
-                horario_aplicado,
+                turma_id_aplicada,
             ))
 
-        # TODOS OS HORÁRIOS + DATA ESPECÍFICA
         elif (
-            horario_aplicado == "Todos os horários"
+            turma_id_aplicada is None
             and data_aplicada is not None
         ):
             cursor.execute("""
@@ -3200,12 +3212,12 @@ elif menu == "✅ Presenças":
                 WHERE p.data = ?
                 ORDER BY
                     t.horario,
+                    t.dias,
                     a.nome
             """, (
                 str(data_aplicada),
             ))
 
-        # HORÁRIO ESPECÍFICO + DATA ESPECÍFICA
         else:
             cursor.execute("""
                 SELECT
@@ -3220,12 +3232,12 @@ elif menu == "✅ Presenças":
                     ON p.aluno_id = a.id
                 INNER JOIN turmas t
                     ON p.turma_id = t.id
-                WHERE t.horario = ?
+                WHERE p.turma_id = ?
                 AND p.data = ?
                 ORDER BY
                     a.nome
             """, (
-                horario_aplicado,
+                turma_id_aplicada,
                 str(data_aplicada)
             ))
 
@@ -3261,9 +3273,6 @@ elif menu == "✅ Presenças":
                 except Exception:
                     data_formatada = data_registro
 
-                # =========================
-                # SEPARAÇÃO POR DATA
-                # =========================
                 if data_registro != data_anterior:
 
                     if data_anterior is not None:
@@ -3359,6 +3368,7 @@ elif menu == "✅ Presenças":
                                 "com sucesso!"
                             )
 
+                         
                             st.rerun()
 elif menu == "💰 Financeiro":
     st.title("Financeiro")
