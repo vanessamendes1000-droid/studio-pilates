@@ -3063,15 +3063,28 @@ elif menu == "✅ Presenças":
             + horarios
         )
 
+        # =========================
+        # VALORES INICIAIS DOS FILTROS
+        # =========================
+        if "filtro_horario_aplicado" not in st.session_state:
+            st.session_state[
+                "filtro_horario_aplicado"
+            ] = "Todos os horários"
+
+        if "filtro_data_aplicado" not in st.session_state:
+            st.session_state[
+                "filtro_data_aplicado"
+            ] = None
+
+        # =========================
+        # CAMPOS DE BUSCA
+        # =========================
         horario_selecionado = st.selectbox(
             "Buscar por horário",
             opcoes_horarios,
             key="historico_presenca_horario"
         )
 
-        # =========================
-        # FILTRO POR DATA
-        # =========================
         filtro_data = st.selectbox(
             "Buscar por data",
             [
@@ -3090,13 +3103,37 @@ elif menu == "✅ Presenças":
             data_selecionada = None
 
         # =========================
+        # BOTÃO BUSCAR
+        # =========================
+        if st.button(
+            "🔎 Buscar",
+            key="buscar_historico_presencas"
+        ):
+            st.session_state[
+                "filtro_horario_aplicado"
+            ] = horario_selecionado
+
+            st.session_state[
+                "filtro_data_aplicado"
+            ] = data_selecionada
+
+        horario_aplicado = st.session_state[
+            "filtro_horario_aplicado"
+        ]
+
+        data_aplicada = st.session_state[
+            "filtro_data_aplicado"
+        ]
+
+        # =========================
         # CONSULTA DO HISTÓRICO
         # =========================
-        if (
-            horario_selecionado == "Todos os horários"
-            and data_selecionada is None
-        ):
 
+        # TODOS OS HORÁRIOS + TODAS AS DATAS
+        if (
+            horario_aplicado == "Todos os horários"
+            and data_aplicada is None
+        ):
             cursor.execute("""
                 SELECT
                     p.id,
@@ -3116,11 +3153,11 @@ elif menu == "✅ Presenças":
                     a.nome
             """)
 
+        # HORÁRIO ESPECÍFICO + TODAS AS DATAS
         elif (
-            horario_selecionado != "Todos os horários"
-            and data_selecionada is None
+            horario_aplicado != "Todos os horários"
+            and data_aplicada is None
         ):
-
             cursor.execute("""
                 SELECT
                     p.id,
@@ -3139,14 +3176,14 @@ elif menu == "✅ Presenças":
                     p.data DESC,
                     a.nome
             """, (
-                horario_selecionado,
+                horario_aplicado,
             ))
 
+        # TODOS OS HORÁRIOS + DATA ESPECÍFICA
         elif (
-            horario_selecionado == "Todos os horários"
-            and data_selecionada is not None
+            horario_aplicado == "Todos os horários"
+            and data_aplicada is not None
         ):
-
             cursor.execute("""
                 SELECT
                     p.id,
@@ -3165,11 +3202,11 @@ elif menu == "✅ Presenças":
                     t.horario,
                     a.nome
             """, (
-                str(data_selecionada),
+                str(data_aplicada),
             ))
 
+        # HORÁRIO ESPECÍFICO + DATA ESPECÍFICA
         else:
-
             cursor.execute("""
                 SELECT
                     p.id,
@@ -3188,11 +3225,141 @@ elif menu == "✅ Presenças":
                 ORDER BY
                     a.nome
             """, (
-                horario_selecionado,
-                str(data_selecionada)
+                horario_aplicado,
+                str(data_aplicada)
             ))
 
         historico_presencas = cursor.fetchall()
+
+        # =========================
+        # RESULTADOS
+        # =========================
+        if len(historico_presencas) == 0:
+            st.info(
+                "Nenhuma presença encontrada "
+                "com os filtros selecionados."
+            )
+
+        else:
+            data_anterior = None
+
+            for registro in historico_presencas:
+
+                data_registro = str(
+                    registro[4]
+                )
+
+                try:
+                    data_formatada = (
+                        datetime.strptime(
+                            data_registro,
+                            "%Y-%m-%d"
+                        ).strftime(
+                            "%d/%m/%Y"
+                        )
+                    )
+                except Exception:
+                    data_formatada = data_registro
+
+                # =========================
+                # SEPARAÇÃO POR DATA
+                # =========================
+                if data_registro != data_anterior:
+
+                    if data_anterior is not None:
+                        st.divider()
+
+                    st.markdown(
+                        f"### 📅 {data_formatada}"
+                    )
+
+                    data_anterior = data_registro
+
+                col_info, col_excluir = st.columns(
+                    [5, 1]
+                )
+
+                with col_info:
+                    st.write(
+                        f"**{registro[1]}** | "
+                        f"{registro[2]} - "
+                        f"{registro[3]} | "
+                        f"{registro[5]}"
+                    )
+
+                with col_excluir:
+                    if st.button(
+                        "🗑️ Excluir",
+                        key=(
+                            f"excluir_presenca_"
+                            f"{registro[0]}"
+                        )
+                    ):
+                        cursor.execute("""
+                            SELECT
+                                aluno_id,
+                                turma_id,
+                                data,
+                                status
+                            FROM presencas
+                            WHERE id = ?
+                        """, (
+                            registro[0],
+                        ))
+
+                        dados_presenca = (
+                            cursor.fetchone()
+                        )
+
+                        if dados_presenca:
+                            aluno_id_excluir = (
+                                dados_presenca[0]
+                            )
+
+                            turma_id_excluir = (
+                                dados_presenca[1]
+                            )
+
+                            data_excluir = (
+                                dados_presenca[2]
+                            )
+
+                            status_excluir = (
+                                dados_presenca[3]
+                            )
+
+                            if (
+                                status_excluir
+                                == "Reposição"
+                            ):
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET status = 'Agendada'
+                                    WHERE aluno_id = ?
+                                    AND data_reposicao = ?
+                                    AND turma_reposicao_id = ?
+                                    AND status = 'Realizada'
+                                """, (
+                                    aluno_id_excluir,
+                                    data_excluir,
+                                    turma_id_excluir
+                                ))
+
+                            cursor.execute("""
+                                DELETE FROM presencas
+                                WHERE id = ?
+                            """, (
+                                registro[0],
+                            ))
+
+                            conn.commit()
+
+                            st.success(
+                                "Presença excluída "
+                                "com sucesso!"
+                            )
+
+                            st.rerun()
 elif menu == "💰 Financeiro":
     st.title("Financeiro")
 
