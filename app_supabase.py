@@ -5434,51 +5434,17 @@ elif menu == "👨‍🏫 Instrutores":
         )
 
         cursor.execute("""
-    SELECT
-        i.nome,
-        i.percentual,
+            SELECT
+                id,
+                nome,
+                percentual
+            FROM instrutores
+            ORDER BY nome
+        """)
 
-        (
-            SELECT COUNT(*)
-            FROM presencas p
-            WHERE p.instrutor_aula = i.nome
+        instrutores_pagamento = cursor.fetchall()
 
-            AND p.data BETWEEN ? AND ?
-
-            AND (
-                p.status = 'Presente'
-
-                OR (
-                    p.status = 'Falta'
-
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM reposicoes r
-                        WHERE r.aluno_id = p.aluno_id
-                        AND r.data_falta = p.data
-                        AND r.direito_reposicao = 'Sim'
-                        AND r.status IN (
-                            'Pendente',
-                            'Agendada',
-                            'Realizada'
-                        )
-                    )
-                )
-
-                OR p.status = 'Reposição'
-            )
-        ) AS presencas
-
-    FROM instrutores i
-
-    ORDER BY i.nome
-""", (
-    str(data_inicio),
-    str(data_fim)
-))
-        pagamentos_instrutores = cursor.fetchall()
-
-        if len(pagamentos_instrutores) == 0:
+        if len(instrutores_pagamento) == 0:
             st.info(
                 "Nenhum instrutor cadastrado."
             )
@@ -5486,37 +5452,104 @@ elif menu == "👨‍🏫 Instrutores":
         else:
             total_geral_instrutores = 0
 
-            for pagamento in pagamentos_instrutores:
-                nome = pagamento[0]
-                percentual = pagamento[1] or 0
-                presencas = pagamento[2] or 0
+            for instrutor in instrutores_pagamento:
+
+                instrutor_id = instrutor[0]
+                nome = instrutor[1]
+                percentual = instrutor[2] or 0
+
+                # =========================
+                # AULAS QUE GERAM PAGAMENTO
+                # =========================
+                cursor.execute("""
+                    SELECT
+                        p.id,
+                        p.data,
+                        a.nome,
+                        p.status,
+                        t.dias,
+                        t.horario
+                    FROM presencas p
+
+                    INNER JOIN alunos a
+                        ON p.aluno_id = a.id
+
+                    INNER JOIN turmas t
+                        ON p.turma_id = t.id
+
+                    WHERE p.instrutor_aula = ?
+
+                    AND p.data BETWEEN ? AND ?
+
+                    AND (
+                        p.status = 'Presente'
+
+                        OR (
+                            p.status = 'Falta'
+
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM reposicoes r
+                                WHERE r.aluno_id = p.aluno_id
+                                AND r.data_falta = p.data
+                                AND r.direito_reposicao = 'Sim'
+                                AND r.status IN (
+                                    'Pendente',
+                                    'Agendada',
+                                    'Realizada'
+                                )
+                            )
+                        )
+
+                        OR p.status = 'Reposição'
+                    )
+
+                    ORDER BY
+                        p.data,
+                        t.horario,
+                        a.nome
+                """, (
+                    nome,
+                    str(data_inicio),
+                    str(data_fim)
+                ))
+
+                aulas_pagamento = cursor.fetchall()
+
+                quantidade_aulas = len(
+                    aulas_pagamento
+                )
 
                 valor_por_presenca = (
                     valor_aula_aluno
-                    *float(percentual)
+                    * float(percentual)
                     / 100
                 )
 
                 total_instrutor = (
-                    presencas
+                    quantidade_aulas
                     * valor_por_presenca
                 )
 
-                total_geral_instrutores += total_instrutor
+                total_geral_instrutores += (
+                    total_instrutor
+                )
+
+                st.divider()
 
                 st.markdown(
-                    f"### {nome}"
+                    f"### 👨‍🏫 {nome}"
                 )
 
                 col1, col2, col3 = st.columns(3)
 
                 col1.metric(
-                    "Alunos presentes",
-                    presencas
+                    "Aulas para pagamento",
+                    quantidade_aulas
                 )
 
                 col2.metric(
-                    "Valor por presença",
+                    "Valor por aluno/aula",
                     f"R$ {valor_por_presenca:.2f}"
                 )
 
@@ -5524,6 +5557,59 @@ elif menu == "👨‍🏫 Instrutores":
                     "Total a pagar",
                     f"R$ {total_instrutor:.2f}"
                 )
+
+                # =========================
+                # DETALHAMENTO
+                # =========================
+                st.markdown(
+                    "#### 📋 Detalhamento"
+                )
+
+                if len(aulas_pagamento) == 0:
+                    st.caption(
+                        "Nenhuma aula para pagamento "
+                        "nesse período."
+                    )
+
+                else:
+                    for aula in aulas_pagamento:
+
+                        data_aula = str(
+                            aula[1]
+                        )
+
+                        try:
+                            data_formatada = (
+                                datetime.strptime(
+                                    data_aula,
+                                    "%Y-%m-%d"
+                                ).strftime(
+                                    "%d/%m/%Y"
+                                )
+                            )
+                        except Exception:
+                            data_formatada = data_aula
+
+                        aluno_nome = aula[2]
+                        status = aula[3]
+                        dias = aula[4]
+                        horario = aula[5]
+
+                        # Nome mais claro
+                        # para falta remunerada
+                        if status == "Falta":
+                            status_exibicao = (
+                                "Falta sem reposição"
+                            )
+                        else:
+                            status_exibicao = status
+
+                        st.write(
+                            f"**{data_formatada}** | "
+                            f"**{aluno_nome}** | "
+                            f"{status_exibicao} | "
+                            f"{dias} - {horario}"
+                        )
 
             st.divider()
 
