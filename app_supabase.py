@@ -29,7 +29,7 @@ ssl_context = ssl.create_default_context(
 
 ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
 def criar_conexao():
-    return pg8000.dbapi.connect(
+    conexao = pg8000.dbapi.connect(
         host=postgres["host"],
         port=int(postgres["port"]),
         database=postgres["dbname"],
@@ -38,6 +38,9 @@ def criar_conexao():
         ssl_context=ssl_context
     )
 
+    conexao.autocommit = True
+
+    return conexao
 if "conexao_banco" not in st.session_state:
     st.session_state.conexao_banco = criar_conexao()
 conn = st.session_state.conexao_banco
@@ -58,70 +61,71 @@ class CursorCompat:
         self.conexao = conexao
         self.cursor = None
 
-    def execute(self, sql, params=None):
-        global conn
-
-        sql = sql.replace("?", "%s")
-
-        try:
-            # Cria um cursor novo para cada consulta
-            self.cursor = self.conexao.cursor()
-
-            if params is None:
-                return self.cursor.execute(sql)
-
-            return self.cursor.execute(
-                sql,
-                params
-            )
-
-        except pg8000.dbapi.InterfaceError:
-            # Reconecta caso a conexão tenha fechado
+    def _novo_cursor(self):
+        if self.cursor is not None:
             try:
-                self.conexao.close()
+                self.cursor.close()
             except Exception:
                 pass
 
-            nova_conexao = criar_conexao()
+        self.cursor = self.conexao.cursor()
+        return self.cursor
 
-            st.session_state.conexao_banco = (
-                nova_conexao
-            )
+    def _reconectar(self):
+        global conn
 
-            conn = nova_conexao
-            self.conexao = nova_conexao
+        try:
+            if self.cursor is not None:
+                self.cursor.close()
+        except Exception:
+            pass
 
-            self.cursor = (
-                nova_conexao.cursor()
-            )
+        try:
+            self.conexao.close()
+        except Exception:
+            pass
+
+        nova_conexao = criar_conexao()
+
+        st.session_state.conexao_banco = (
+            nova_conexao
+        )
+
+        conn = nova_conexao
+        self.conexao = nova_conexao
+        self.cursor = None
+
+    def execute(self, sql, params=None):
+        sql = sql.replace("?", "%s")
+
+        # Tenta a consulta normalmente.
+        try:
+            cursor_atual = self._novo_cursor()
 
             if params is None:
-                return self.cursor.execute(sql)
+                return cursor_atual.execute(sql)
 
-            return self.cursor.execute(
+            return cursor_atual.execute(
                 sql,
                 params
             )
 
         except Exception:
-            try:
-                self.conexao.rollback()
-            except Exception:
-                try:
-                    self.conexao.close()
-                except Exception:
-                    pass
+            # Se a conexão/cursor entrou em estado inválido
+            # (ex.: portal 34000, conexão fechada, transação
+            # quebrada), descarta tudo e tenta uma vez
+            # em uma conexão nova.
+            self._reconectar()
 
-                nova_conexao = criar_conexao()
+            cursor_atual = self._novo_cursor()
 
-                st.session_state.conexao_banco = (
-                    nova_conexao
-                )
+            if params is None:
+                return cursor_atual.execute(sql)
 
-                conn = nova_conexao
-                self.conexao = nova_conexao
-
-            raise
+            return cursor_atual.execute(
+                sql,
+                params
+            )
 
     def fetchone(self):
         if self.cursor is None:
@@ -134,7 +138,6 @@ class CursorCompat:
             return []
 
         return self.cursor.fetchall()
-
 
 cursor = CursorCompat(conn)
 st.set_page_config(
@@ -2920,15 +2923,33 @@ elif menu == "✅ Presenças":
                             )
                         )
 
+                        motivo_ausencia = ""
+
+                        if status == "Ausência justificada":
+                            motivo_ausencia = st.text_input(
+                                "Motivo da ausência",
+                                placeholder=(
+                                    "Ex.: consulta médica, "
+                                    "mal-estar, viagem..."
+                                ),
+                                key=(
+                                    f"motivo_ausencia_"
+                                    f"{turma_id_presenca}_"
+                                    f"{aluno_id}_"
+                                    f"{data_aula}"
+                                )
+                            )
+
                         presencas_marcadas.append(
                             (
                                 aluno_id,
                                 turma_id_presenca,
                                 str(data_aula),
-                                status
+                                status,
+                                None,
+                                motivo_ausencia
                             )
                         )
-
                     # =========================
                     # ALUNOS DE REPOSIÇÃO
                     # =========================
@@ -2983,11 +3004,25 @@ elif menu == "✅ Presenças":
                             data = presenca[2]
                             status = presenca[3]
 
+                            # =========================
+                            # DADOS EXTRAS
+                            # =========================
+                            reposicao_id = None
+                            motivo_ausencia = ""
+
                             if len(presenca) > 4:
                                 reposicao_id = presenca[4]
-                            else:
-                                reposicao_id = None
 
+                            if len(presenca) > 5:
+                                motivo_ausencia = (
+                                    presenca[5]
+                                    or ""
+                                )
+
+                            # =========================
+                            # VERIFICA SE A PRESENÇA
+                            # JÁ EXISTE
+                            # =========================
                             cursor.execute("""
                                 SELECT id
                                 FROM presencas
@@ -3004,6 +3039,9 @@ elif menu == "✅ Presenças":
                                 cursor.fetchone()
                             )
 
+                            # =========================
+                            # ATUALIZA PRESENÇA
+                            # =========================
                             if presenca_existente:
                                 cursor.execute("""
                                     UPDATE presencas
@@ -3017,6 +3055,9 @@ elif menu == "✅ Presenças":
                                     presenca_existente[0]
                                 ))
 
+                            # =========================
+                            # NOVA PRESENÇA
+                            # =========================
                             else:
                                 cursor.execute("""
                                     INSERT INTO presencas
@@ -3036,6 +3077,98 @@ elif menu == "✅ Presenças":
                                     instrutor_aula
                                 ))
 
+                            # =========================
+                            # AUSÊNCIA JUSTIFICADA
+                            # CRIA REPOSIÇÃO AUTOMÁTICA
+                            # =========================
+                            if status == "Ausência justificada":
+
+                                cursor.execute("""
+                                    SELECT id
+                                    FROM reposicoes
+                                    WHERE aluno_id = ?
+                                    AND data_falta = ?
+                                    LIMIT 1
+                                """, (
+                                    aluno_id,
+                                    data
+                                ))
+
+                                reposicao_ausencia = (
+                                    cursor.fetchone()
+                                )
+
+                                # Ainda não existe reposição
+                                if reposicao_ausencia is None:
+
+                                    cursor.execute("""
+                                        INSERT INTO reposicoes
+                                        (
+                                            aluno_id,
+                                            data_falta,
+                                            motivo,
+                                            direito_reposicao,
+                                            data_reposicao,
+                                            status,
+                                            turma_reposicao_id,
+                                            observacao
+                                        )
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        aluno_id,
+                                        data,
+                                        motivo_ausencia,
+                                        "Sim",
+                                        None,
+                                        "Pendente",
+                                        None,
+                                        (
+                                            "Gerada automaticamente "
+                                            "pela chamada"
+                                        )
+                                    ))
+
+                                # Já existe:
+                                # atualiza o motivo
+                                else:
+                                    cursor.execute("""
+                                        UPDATE reposicoes
+                                        SET
+                                            motivo = ?,
+                                            direito_reposicao = 'Sim'
+                                        WHERE id = ?
+                                        AND status = 'Pendente'
+                                    """, (
+                                        motivo_ausencia,
+                                        reposicao_ausencia[0]
+                                    ))
+
+                            # =========================
+                            # SE CORRIGIR A CHAMADA
+                            # REMOVE REPOSIÇÃO AUTOMÁTICA
+                            # AINDA PENDENTE
+                            # =========================
+                            elif status in (
+                                "Presente",
+                                "Falta"
+                            ):
+
+                                cursor.execute("""
+                                    DELETE FROM reposicoes
+                                    WHERE aluno_id = ?
+                                    AND data_falta = ?
+                                    AND status IN (
+                                        'Pendente',
+                                        'Agendada'
+                                    )
+                                """, (
+                                    aluno_id,
+                                    data
+                                ))
+
+                            # =========================
+                            # REPOSIÇÃO REALIZADA
+                            # =========================
                             if (
                                 reposicao_id is not None
                                 and status == "Reposição"
@@ -3050,11 +3183,13 @@ elif menu == "✅ Presenças":
 
                         conn.commit()
 
-                        st.session_state["mensagem_chamada"] = (
+                        st.session_state[
+                            "mensagem_chamada"
+                        ] = (
                             "✅ Chamada salva com sucesso!"
                         )
 
-                        st.rerun()
+                        st.rerun()                            
     # =========================
     # ABA 2 - HISTÓRICO
     # =========================
@@ -3282,8 +3417,15 @@ elif menu == "✅ Presenças":
             horario_anterior = None
             data_anterior = None
 
-            for registro in historico_presencas:
+            # Monta todo o histórico em um único bloco visual.
+            # Isso evita muitos elementos dinâmicos na página.
+            linhas_historico = []
 
+            # Guarda os registros para exclusão em um único seletor.
+            opcoes_exclusao = {}
+
+            for registro in historico_presencas:
+                presenca_id = registro[0]
                 nome_registro = registro[1]
                 dias_registro = registro[2]
                 horario_registro = (
@@ -3291,10 +3433,7 @@ elif menu == "✅ Presenças":
                     or "Horário não informado"
                 )
 
-                data_registro = str(
-                    registro[4]
-                )
-
+                data_registro = str(registro[4])
                 status_registro = registro[5]
 
                 try:
@@ -3302,132 +3441,171 @@ elif menu == "✅ Presenças":
                         datetime.strptime(
                             data_registro,
                             "%Y-%m-%d"
-                        ).strftime(
-                            "%d/%m/%Y"
-                        )
+                        ).strftime("%d/%m/%Y")
                     )
                 except Exception:
                     data_formatada = data_registro
 
-                # =========================
-                # TODAS AS TURMAS
-                # SEPARA PRIMEIRO POR HORÁRIO
-                # =========================
+                # Quando estiver vendo todas as turmas,
+                # cria um título para cada horário.
                 if turma_id_aplicada is None:
-
-                    if (
-                        horario_registro
-                        != horario_anterior
-                    ):
+                    if horario_registro != horario_anterior:
                         if horario_anterior is not None:
-                            st.divider()
+                            linhas_historico.append("---")
 
-                        st.markdown(
-                            f"## 🕐 {horario_registro}"
+                        linhas_historico.append(
+                            f"🕐 {horario_registro}"
                         )
 
-                        horario_anterior = (
-                            horario_registro
-                        )
-
+                        horario_anterior = horario_registro
                         data_anterior = None
 
-                # =========================
-                # SEPARAÇÃO POR DATA
-                # =========================
+                # Cria um título para cada data.
                 if data_registro != data_anterior:
-
-                    st.markdown(
-                        f"### 📅 {data_formatada}"
+                    linhas_historico.append(
+                        f"📅 {data_formatada}"
                     )
-
                     data_anterior = data_registro
 
-                col_info, col_excluir = st.columns(
-                    [5, 1]
+                # Limpa espaços e caracteres estranhos
+                # antes de mostrar os dados no histórico.
+                nome_registro = str(
+                    nome_registro or ""
+                ).strip()
+
+                dias_registro = str(
+                    dias_registro or ""
+                ).strip()
+
+                horario_registro = str(
+                    horario_registro or ""
+                ).strip()
+
+                status_registro = str(
+                    status_registro or ""
+                ).strip()
+
+                # Linha da presença sem Markdown.
+                linhas_historico.append(
+                    f"{nome_registro} | "
+                    f"{dias_registro} - "
+                    f"{horario_registro} | "
+                    f"{status_registro}"
                 )
 
-                with col_info:
-                    st.write(
-                        f"**{nome_registro}** | "
-                        f"{dias_registro} - "
-                        f"{horario_registro} | "
-                        f"{status_registro}"
+                label_exclusao = (
+                    f"{data_formatada} | "
+                    f"{nome_registro} | "
+                    f"{dias_registro} - {horario_registro} | "
+                    f"{status_registro} | ID {presenca_id}"
+                )
+
+                opcoes_exclusao[label_exclusao] = presenca_id
+
+            # Renderiza o histórico como texto puro.
+            # Isso evita conflito de Markdown/HTML com nomes
+            # ou outros dados vindos do banco.
+            st.text(
+                "\n\n".join(linhas_historico)
+            )
+
+            st.divider()
+            st.markdown("### 🗑️ Excluir registro")
+
+            lista_exclusao = (
+                [""]
+                + list(opcoes_exclusao.keys())
+            )
+
+            registro_excluir = st.selectbox(
+                "Selecione a presença que deseja excluir",
+                lista_exclusao,
+                key="historico_registro_excluir"
+            )
+
+            if registro_excluir != "":
+                if st.button(
+                    "🗑️ Excluir presença selecionada",
+                    key="historico_excluir_presenca"
+                ):
+                    presenca_id_excluir = (
+                        opcoes_exclusao[
+                            registro_excluir
+                        ]
                     )
 
-                with col_excluir:
-                    if st.button(
-                        "🗑️ Excluir",
-                        key=(
-                            f"excluir_presenca_"
-                            f"{registro[0]}"
-                        )
-                    ):
-                        cursor.execute("""
-                            SELECT
-                                aluno_id,
-                                turma_id,
-                                data,
-                                status
-                            FROM presencas
-                            WHERE id = ?
-                        """, (
-                            registro[0],
-                        ))
+                    cursor.execute("""
+                        SELECT
+                            aluno_id,
+                            turma_id,
+                            data,
+                            status
+                        FROM presencas
+                        WHERE id = ?
+                    """, (
+                        presenca_id_excluir,
+                    ))
 
-                        dados_presenca = (
-                            cursor.fetchone()
-                        )
+                    dados_presenca = cursor.fetchone()
 
-                        if dados_presenca:
-                            aluno_id_excluir = (
-                                dados_presenca[0]
-                            )
+                    if dados_presenca:
+                        aluno_id_excluir = dados_presenca[0]
+                        turma_id_excluir = dados_presenca[1]
+                        data_excluir = dados_presenca[2]
+                        status_excluir = dados_presenca[3]
 
-                            turma_id_excluir = (
-                                dados_presenca[1]
-                            )
-
-                            data_excluir = (
-                                dados_presenca[2]
-                            )
-
-                            status_excluir = (
-                                dados_presenca[3]
-                            )
-
-                            if (
-                                status_excluir
-                                == "Reposição"
-                            ):
-                                cursor.execute("""
-                                    UPDATE reposicoes
-                                    SET status = 'Agendada'
-                                    WHERE aluno_id = ?
-                                    AND data_reposicao = ?
-                                    AND turma_reposicao_id = ?
-                                    AND status = 'Realizada'
-                                """, (
-                                    aluno_id_excluir,
-                                    data_excluir,
-                                    turma_id_excluir
-                                ))
-
+                        # Se era uma reposição realizada,
+                        # volta a reposição para Agendada.
+                        if status_excluir == "Reposição":
                             cursor.execute("""
-                                DELETE FROM presencas
-                                WHERE id = ?
+                                UPDATE reposicoes
+                                SET status = 'Agendada'
+                                WHERE aluno_id = ?
+                                AND data_reposicao = ?
+                                AND turma_reposicao_id = ?
+                                AND status = 'Realizada'
                             """, (
-                                registro[0],
+                                aluno_id_excluir,
+                                data_excluir,
+                                turma_id_excluir
                             ))
 
-                            conn.commit()
+                        # Se era ausência justificada,
+                        # remove a reposição correspondente.
+                        if (
+                            status_excluir
+                            == "Ausência justificada"
+                        ):
+                            cursor.execute("""
+                                DELETE FROM reposicoes
+                                WHERE aluno_id = ?
+                                AND data_falta = ?
+                                AND status IN (
+                                    'Pendente',
+                                    'Agendada'
+                                )
+                            """, (
+                                aluno_id_excluir,
+                                data_excluir
+                            ))
 
-                            st.success(
-                                "Presença excluída "
-                                "com sucesso!"
-                            )
+                        cursor.execute("""
+                            DELETE FROM presencas
+                            WHERE id = ?
+                        """, (
+                            presenca_id_excluir,
+                        ))
 
-                            st.rerun()
+                        conn.commit()
+
+                        st.session_state[
+                            "mensagem_historico"
+                        ] = (
+                            "✅ Presença excluída com sucesso!"
+                        )
+
+                        st.rerun()
+
 elif menu == "💰 Financeiro":
     st.title("Financeiro")
 
@@ -4816,112 +4994,15 @@ elif menu == "💸 Despesas":
 elif menu == "🔄 Reposições":
     st.title("Reposições")
 
-    aba_registro, aba_agendar, aba_lista = st.tabs(
+    aba_agendar, aba_lista = st.tabs(
         [
-            "➕ Registrar falta",
             "📅 Agendar reposição",
             "📋 Reposições registradas"
         ]
     )
 
     # =========================
-    # ABA 1 - REGISTRAR FALTA
-    # =========================
-    with aba_registro:
-        st.subheader("Registrar falta / direito à reposição")
-
-        cursor.execute("""
-            SELECT id, nome
-            FROM alunos
-            ORDER BY nome
-        """)
-
-        alunos_reposicao = cursor.fetchall()
-
-        if len(alunos_reposicao) == 0:
-            st.info(
-                "Nenhum aluno cadastrado."
-            )
-
-        else:
-            opcoes_alunos = {
-                f"{aluno[1]} - ID {aluno[0]}": aluno[0]
-                for aluno in alunos_reposicao
-            }
-
-            aluno_reposicao = st.selectbox(
-                "Aluno",
-                list(opcoes_alunos.keys()),
-                key="reposicao_aluno"
-            )
-
-            aluno_id_reposicao = opcoes_alunos[
-                aluno_reposicao
-            ]
-
-            data_falta = st.date_input(
-                "Data da falta",
-                key="reposicao_data_falta"
-            )
-
-            motivo = st.text_input(
-                "Motivo da falta",
-                key="reposicao_motivo"
-            )
-
-            direito_reposicao = st.selectbox(
-                "Tem direito à reposição?",
-                [
-                    "Sim",
-                    "Não"
-                ],
-                key="reposicao_direito"
-            )
-
-            st.caption(
-                "A data e a turma da reposição serão "
-                "definidas depois, quando houver vaga."
-            )
-
-            if st.button(
-                "Salvar falta",
-                key="salvar_reposicao"
-            ):
-                if direito_reposicao == "Sim":
-                    status_reposicao = "Pendente"
-                else:
-                    status_reposicao = "Sem direito"
-
-                cursor.execute("""
-                    INSERT INTO reposicoes
-                    (
-                        aluno_id,
-                        data_falta,
-                        motivo,
-                        direito_reposicao,
-                        data_reposicao,
-                        status,
-                        turma_reposicao_id
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    aluno_id_reposicao,
-                    str(data_falta),
-                    motivo,
-                    direito_reposicao,
-                    None,
-                    status_reposicao,
-                    None
-                ))
-
-                conn.commit()
-
-                st.success(
-                    "Falta registrada com sucesso!"
-                )
-
-    # =========================
-    # ABA 2 - AGENDAR REPOSIÇÃO
+    # ABA 1 - AGENDAR REPOSIÇÃO
     # =========================
     with aba_agendar:
         st.subheader("Agendar reposição")
@@ -4930,7 +5011,8 @@ elif menu == "🔄 Reposições":
             SELECT
                 r.id,
                 a.nome,
-                r.data_falta
+                r.data_falta,
+                r.motivo
             FROM reposicoes r
             INNER JOIN alunos a
                 ON r.aluno_id = a.id
@@ -4951,6 +5033,7 @@ elif menu == "🔄 Reposições":
                 (
                     f"{r[1]} | "
                     f"Falta: {r[2]} | "
+                    f"Motivo: {r[3] or 'Não informado'} | "
                     f"ID {r[0]}"
                 ): r[0]
                 for r in reposicoes_pendentes
@@ -5181,7 +5264,7 @@ elif menu == "🔄 Reposições":
                     st.rerun()
 
     # =========================
-    # ABA 3 - REPOSIÇÕES REGISTRADAS
+    # ABA 2 - REPOSIÇÕES REGISTRADAS
     # =========================
     with aba_lista:
         st.subheader("Reposições registradas")
@@ -5214,91 +5297,166 @@ elif menu == "🔄 Reposições":
             )
 
         else:
-            for reposicao in reposicoes:
-                st.write(
-                    f"**{reposicao[1]}**"
+            reposicoes_pendentes = [
+                reposicao
+                for reposicao in reposicoes
+                if reposicao[6] == "Pendente"
+            ]
+
+            reposicoes_agendadas = [
+                reposicao
+                for reposicao in reposicoes
+                if reposicao[6] == "Agendada"
+            ]
+
+            reposicoes_realizadas = [
+                reposicao
+                for reposicao in reposicoes
+                if reposicao[6] == "Realizada"
+            ]
+
+            if (
+                "mensagem_reposicao_excluida"
+                in st.session_state
+            ):
+                st.success(
+                    st.session_state[
+                        "mensagem_reposicao_excluida"
+                    ]
                 )
 
-                st.write(
-                    f"Falta: {reposicao[2]} | "
-                    f"Direito: {reposicao[4]}"
+                del st.session_state[
+                    "mensagem_reposicao_excluida"
+                ]
+
+            def mostrar_reposicao_compacta(
+                reposicao,
+                status_texto
+            ):
+                with st.container(border=True):
+                    nome = reposicao[1]
+                    data_falta = reposicao[2]
+                    motivo = reposicao[3] or ""
+                    direito = reposicao[4]
+                    data_reposicao = reposicao[5]
+                    dias_reposicao = reposicao[7]
+                    horario_reposicao = reposicao[8]
+                    observacao = reposicao[9] or ""
+
+                    st.markdown(
+                        f"**{nome}**"
+                    )
+
+                    st.caption(
+                        f"Falta: {data_falta}"
+                    )
+
+                    st.caption(
+                        f"Direito: {direito} | "
+                        f"{status_texto}"
+                    )
+
+                    if motivo:
+                        st.caption(
+                            f"Motivo: {motivo}"
+                        )
+
+                    if data_reposicao:
+                        st.caption(
+                            f"Reposição: {data_reposicao}"
+                        )
+
+                    if dias_reposicao:
+                        st.caption(
+                            f"Turma: {dias_reposicao} - "
+                            f"{horario_reposicao or ''}"
+                        )
+
+                    if observacao:
+                        st.caption(
+                            f"Obs.: {observacao}"
+                        )
+
+                    if st.button(
+                        "🗑️ Excluir",
+                        key=(
+                            f"excluir_reposicao_"
+                            f"{reposicao[0]}"
+                        )
+                    ):
+                        cursor.execute("""
+                            DELETE FROM reposicoes
+                            WHERE id = ?
+                        """, (
+                            reposicao[0],
+                        ))
+
+                        conn.commit()
+
+                        st.session_state[
+                            "mensagem_reposicao_excluida"
+                        ] = (
+                            "✅ Reposição excluída "
+                            "com sucesso!"
+                        )
+
+                        st.rerun()
+
+            col_pendentes, col_agendadas, col_realizadas = (
+                st.columns(3)
+            )
+
+            with col_pendentes:
+                st.markdown(
+                    f"### 🔴 Pendentes "
+                    f"({len(reposicoes_pendentes)})"
                 )
 
-                status_reposicao = reposicao[6]
-
-                if status_reposicao == "Pendente":
-                    st.markdown(
-                        "<span style='color:#c62828; "
-                        "font-weight:700;'>"
-                        "🔴 Pendente"
-                        "</span>",
-                        unsafe_allow_html=True
+                if len(reposicoes_pendentes) == 0:
+                    st.caption(
+                        "Nenhuma pendente."
                     )
-
-                elif status_reposicao == "Realizada":
-                    st.markdown(
-                        "<span style='color:#2e7d32; "
-                        "font-weight:700;'>"
-                        "🟢 Realizada"
-                        "</span>",
-                        unsafe_allow_html=True
-                    )
-
-                elif status_reposicao == "Agendada":
-                    st.markdown(
-                        "<span style='color:#ef6c00; "
-                        "font-weight:700;'>"
-                        "🟠 Agendada"
-                        "</span>",
-                        unsafe_allow_html=True
-                    )
-
                 else:
-                    st.write(
-                        f"Status: {status_reposicao}"
-                    )
-                if reposicao[5]:
-                    st.write(
-                        f"📅 Reposição: "
-                        f"{reposicao[5]}"
-                    )
+                    for reposicao in reposicoes_pendentes:
+                        mostrar_reposicao_compacta(
+                            reposicao,
+                            "🔴 Pendente"
+                        )
 
-                if reposicao[7]:
-                    st.write(
-                        f"🏫 Turma: "
-                        f"{reposicao[7]} - "
-                        f"{reposicao[8]}"
-                    )
+            with col_agendadas:
+                st.markdown(
+                    f"### 🟠 Agendadas "
+                    f"({len(reposicoes_agendadas)})"
+                )
 
-                if reposicao[3]:
+                if len(reposicoes_agendadas) == 0:
                     st.caption(
-                        f"Motivo: {reposicao[3]}"
+                        "Nenhuma agendada."
                     )
+                else:
+                    for reposicao in reposicoes_agendadas:
+                        mostrar_reposicao_compacta(
+                            reposicao,
+                            "🟠 Agendada"
+                        )
 
-                if reposicao[9]:
+            with col_realizadas:
+                st.markdown(
+                    f"### 🟢 Realizadas "
+                    f"({len(reposicoes_realizadas)})"
+                )
+
+                if len(reposicoes_realizadas) == 0:
                     st.caption(
-                        f"Observação: {reposicao[9]}"
+                        "Nenhuma realizada."
                     )
+                else:
+                    for reposicao in reposicoes_realizadas:
+                        mostrar_reposicao_compacta(
+                            reposicao,
+                            "🟢 Realizada"
+                        )
 
-                if st.button(
-                    "🗑️ Excluir reposição",
-                    key=f"excluir_reposicao_{reposicao[0]}"
-                ):
-                    cursor.execute("""
-                        DELETE FROM reposicoes
-                        WHERE id = ?
-                    """, (
-                        reposicao[0],
-                    ))
-
-                    conn.commit()
-
-                    st.success(
-                        "Reposição excluída com sucesso!"
-                    )
-
-                    st.rerun()
-                st.divider()
 elif menu == "👨‍🏫 Instrutores":
     st.title("Instrutores")
 
