@@ -819,33 +819,99 @@ if menu == "🏠 Início":
     )
 
     if total_alertas == 0:
-        st.success(
-            "Nenhuma renovação prevista para os próximos 7 dias."
-        )
-    if total_alertas == 0:
-        st.success(
-            "Nenhuma renovação prevista para os próximos 7 dias."
+        st.caption(
+            "✅ Nenhuma renovação prevista "
+            "para os próximos 7 dias."
         )
 
-    for nome, data_renovacao, dias_atraso in renovacoes_atrasadas:
-        st.error(
-            f"🔴 {nome} — renovação prevista para "
-            f"{data_renovacao.strftime('%d/%m/%Y')} "
-            f"({dias_atraso} dia(s) em atraso)"
+    else:
+        lista_renovacoes = []
+
+        for (
+            nome,
+            data_renovacao,
+            dias_atraso
+        ) in renovacoes_atrasadas:
+            lista_renovacoes.append(
+                (
+                    nome,
+                    data_renovacao,
+                    "Atrasada",
+                    dias_atraso
+                )
+            )
+
+        for nome, data_renovacao in renovacoes_hoje:
+            lista_renovacoes.append(
+                (
+                    nome,
+                    data_renovacao,
+                    "Hoje",
+                    0
+                )
+            )
+
+        for (
+            nome,
+            data_renovacao,
+            dias_restantes
+        ) in renovacoes_proximas:
+            lista_renovacoes.append(
+                (
+                    nome,
+                    data_renovacao,
+                    "Próxima",
+                    dias_restantes
+                )
+            )
+
+        lista_renovacoes.sort(
+            key=lambda item: (
+                abs(
+                    (
+                        item[1]
+                        - hoje
+                    ).days
+                ),
+                item[1]
+            )
         )
 
-    for nome, data_renovacao in renovacoes_hoje:
-        st.error(
-            f"🔴 {nome} — RENOVAÇÃO HOJE "
-            f"({data_renovacao.strftime('%d/%m/%Y')})"
-        )
+        with st.expander(
+            f"Ver detalhes das renovações "
+            f"({total_alertas})",
+            expanded=False
+        ):
+            for (
+                nome,
+                data_renovacao,
+                tipo,
+                quantidade_dias
+            ) in lista_renovacoes:
 
-    for nome, data_renovacao, dias_restantes in renovacoes_proximas:
-        st.warning(
-            f"⚠️ {nome} — renovação em "
-            f"{dias_restantes} dia(s): "
-            f"{data_renovacao.strftime('%d/%m/%Y')}"
-        )
+                if tipo == "Hoje":
+                    status_texto = (
+                        "📅 vence hoje"
+                    )
+
+                elif tipo == "Atrasada":
+                    status_texto = (
+                        f"🔴 {quantidade_dias} "
+                        f"dia(s) em atraso"
+                    )
+
+                else:
+                    status_texto = (
+                        f"⚠️ vence em "
+                        f"{quantidade_dias} dia(s)"
+                    )
+
+                st.write(
+                    f"**{nome}** — "
+                    f"{data_renovacao.strftime('%d/%m/%Y')} "
+                    f"| {status_texto}"
+                )
+
     # =========================
     # PILATES
     # =========================
@@ -2703,22 +2769,25 @@ elif menu == "📅 Turmas":
 elif menu == "✅ Presenças":
     st.title("Presenças")
 
-    aba_chamada, aba_historico = st.tabs(
+    secao_presencas = st.radio(
+        "Visualização",
         [
             "✅ Fazer chamada",
             "📋 Histórico de presenças"
-        ]
+        ],
+        horizontal=True,
+        key="secao_presencas"
     )
     # =========================
     # ABA 1 - FAZER CHAMADA
     # =========================
-    with aba_chamada:
-        st.subheader("Fazer chamada")
+    if secao_presencas == "✅ Fazer chamada":
+        st.subheader("Chamadas do dia")
+
         if "mensagem_chamada" in st.session_state:
             st.success(
                 st.session_state["mensagem_chamada"]
             )
-
             del st.session_state["mensagem_chamada"]
 
         # =========================
@@ -2750,15 +2819,39 @@ elif menu == "✅ Presenças":
         # =========================
         cursor.execute("""
             SELECT
-                id,
-                dias,
-                horario,
-                instrutor
-            FROM turmas
-            WHERE dias LIKE ?
-            ORDER BY horario
+                t.id,
+                t.dias,
+                t.horario,
+                t.instrutor,
+
+                (
+                    SELECT COUNT(*)
+                    FROM alunos a
+                    WHERE a.turma_id = t.id
+                ) AS total_fixos,
+
+                (
+                    SELECT COUNT(*)
+                    FROM reposicoes r
+                    WHERE r.turma_reposicao_id = t.id
+                    AND r.data_reposicao = ?
+                    AND r.status = 'Agendada'
+                ) AS total_reposicoes,
+
+                (
+                    SELECT COUNT(DISTINCT p.aluno_id)
+                    FROM presencas p
+                    WHERE p.turma_id = t.id
+                    AND p.data = ?
+                ) AS total_registrado
+
+            FROM turmas t
+            WHERE t.dias LIKE ?
+            ORDER BY t.horario
         """, (
-            f"%{dia_semana_nome}%",
+            str(data_aula),
+            str(data_aula),
+            f"%{dia_semana_nome}%"
         ))
 
         turmas_presenca = cursor.fetchall()
@@ -2769,213 +2862,416 @@ elif menu == "✅ Presenças":
             )
 
         else:
-            opcoes_turmas = {
-                f"{t[1]} - {t[2]}": t[0]
-                for t in turmas_presenca
-            }
+            # =========================
+            # DESCOBRE QUAIS CHAMADAS
+            # JÁ FORAM FINALIZADAS
+            # =========================
+            turmas_pendentes = []
+            turmas_finalizadas = []
 
-            lista_turmas_presenca = (
-                [""]
-                + list(opcoes_turmas.keys())
-            )
+            for turma in turmas_presenca:
+                turma_id = turma[0]
 
-            turma_escolhida = st.selectbox(
-                "Escolha a turma",
-                lista_turmas_presenca,
-                index=0,
-                key="presenca_turma"
-            )
-
-            if turma_escolhida == "":
-                st.info(
-                    "Selecione uma turma para fazer a chamada."
+                total_fixos = (
+                    turma[4]
+                    or 0
                 )
 
-            else:
-                turma_id_presenca = opcoes_turmas[
-                    turma_escolhida
-                ]
+                total_reposicoes_agendadas = (
+                    turma[5]
+                    or 0
+                )
 
-                instrutor_padrao = None
+                total_registrado = (
+                    turma[6]
+                    or 0
+                )
+
+                total_esperado = (
+                    total_fixos
+                    + total_reposicoes_agendadas
+                )
+
+                chamada_finalizada = (
+                    total_esperado > 0
+                    and total_registrado >= total_esperado
+                )
+
+                if chamada_finalizada:
+                    turmas_finalizadas.append(turma)
+                else:
+                    turmas_pendentes.append(turma)
+
+            # Se a turma aberta já foi finalizada,
+            # fecha automaticamente o formulário.
+            turma_aberta = st.session_state.get(
+                "turma_chamada_aberta"
+            )
+
+            ids_pendentes = [
+                turma[0]
+                for turma in turmas_pendentes
+            ]
+
+            if turma_aberta not in ids_pendentes:
+                st.session_state[
+                    "turma_chamada_aberta"
+                ] = None
+
+            # =========================
+            # CHAMADAS PENDENTES
+            # =========================
+            st.markdown(
+                f"### 🔴 Chamadas pendentes "
+                f"({len(turmas_pendentes)})"
+            )
+
+            if len(turmas_pendentes) == 0:
+                st.success(
+                    "✅ Todas as chamadas deste dia foram finalizadas."
+                )
+            else:
+                colunas_chamadas = st.columns(3)
+
+                for indice, turma in enumerate(
+                    turmas_pendentes
+                ):
+                    turma_id = turma[0]
+                    dias_turma = turma[1]
+                    horario_turma = turma[2]
+                    instrutor_turma = (
+                        turma[3]
+                        or "Não informado"
+                    )
+
+                    coluna = colunas_chamadas[
+                        indice % 3
+                    ]
+
+                    with coluna:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"### 🕐 {horario_turma}"
+                            )
+                            st.caption(dias_turma)
+                            st.caption(
+                                f"👨‍🏫 {instrutor_turma}"
+                            )
+                            st.caption(
+                                "🔴 Chamada pendente"
+                            )
+
+                            if st.button(
+                                "Fazer chamada",
+                                key=(
+                                    f"abrir_chamada_"
+                                    f"{turma_id}_"
+                                    f"{data_aula}"
+                                ),
+                                use_container_width=True
+                            ):
+                                st.session_state[
+                                    "turma_chamada_aberta"
+                                ] = turma_id
+                                st.rerun()
+
+            # =========================
+            # CHAMADAS FINALIZADAS
+            # =========================
+            if (
+                "turma_finalizada_detalhes"
+                not in st.session_state
+            ):
+                st.session_state[
+                    "turma_finalizada_detalhes"
+                ] = None
+
+            if len(turmas_finalizadas) > 0:
+                with st.expander(
+                    f"✅ Chamadas finalizadas "
+                    f"({len(turmas_finalizadas)})",
+                    expanded=False
+                ):
+                    for turma in turmas_finalizadas:
+                        turma_id_finalizada = turma[0]
+                        dias_finalizada = turma[1]
+                        horario_finalizada = turma[2]
+
+                        with st.container(border=True):
+                            st.markdown(
+                                f"**🕐 {horario_finalizada}**"
+                            )
+
+                            st.caption(
+                                dias_finalizada
+                            )
+
+                            if st.button(
+                                "👁️ Ver informações",
+                                key=(
+                                    f"ver_chamada_finalizada_"
+                                    f"{turma_id_finalizada}_"
+                                    f"{data_aula}"
+                                ),
+                                use_container_width=True
+                            ):
+                                chave_detalhes = (
+                                    turma_id_finalizada,
+                                    str(data_aula)
+                                )
+
+                                if (
+                                    st.session_state[
+                                        "turma_finalizada_detalhes"
+                                    ]
+                                    == chave_detalhes
+                                ):
+                                    st.session_state[
+                                        "turma_finalizada_detalhes"
+                                    ] = None
+                                else:
+                                    st.session_state[
+                                        "turma_finalizada_detalhes"
+                                    ] = chave_detalhes
+
+                            chave_atual = (
+                                turma_id_finalizada,
+                                str(data_aula)
+                            )
+
+                            if (
+                                st.session_state[
+                                    "turma_finalizada_detalhes"
+                                ]
+                                == chave_atual
+                            ):
+                                cursor.execute("""
+                                    SELECT
+                                        a.nome,
+                                        p.status,
+                                        p.instrutor_aula
+                                    FROM presencas p
+                                    INNER JOIN alunos a
+                                        ON p.aluno_id = a.id
+                                    WHERE p.turma_id = ?
+                                    AND p.data = ?
+                                    ORDER BY a.nome
+                                """, (
+                                    turma_id_finalizada,
+                                    str(data_aula)
+                                ))
+
+                                detalhes_chamada = (
+                                    cursor.fetchall()
+                                )
+
+                                if len(detalhes_chamada) == 0:
+                                    st.caption(
+                                        "Nenhuma informação "
+                                        "encontrada."
+                                    )
+
+                                else:
+                                    instrutores_chamada = []
+
+                                    for detalhe in detalhes_chamada:
+                                        instrutor_registro = (
+                                            detalhe[2]
+                                            or "Não informado"
+                                        )
+
+                                        if (
+                                            instrutor_registro
+                                            not in instrutores_chamada
+                                        ):
+                                            instrutores_chamada.append(
+                                                instrutor_registro
+                                            )
+
+                                    st.caption(
+                                        "👨‍🏫 Instrutor: "
+                                        + ", ".join(
+                                            instrutores_chamada
+                                        )
+                                    )
+
+                                    st.markdown(
+                                        "**Alunos:**"
+                                    )
+
+                                    for detalhe in detalhes_chamada:
+                                        nome_aluno = detalhe[0]
+                                        status_aluno = detalhe[1]
+
+                                        st.write(
+                                            f"• {nome_aluno} — "
+                                            f"{status_aluno}"
+                                        )
+
+            turma_id_presenca = st.session_state.get(
+                "turma_chamada_aberta"
+            )
+
+            # =========================
+            # FORMULÁRIO DA CHAMADA
+            # =========================
+            if turma_id_presenca in ids_pendentes:
+                turma_selecionada = None
 
                 for turma in turmas_presenca:
                     if turma[0] == turma_id_presenca:
-                        instrutor_padrao = turma[3]
+                        turma_selecionada = turma
                         break
 
-                # =========================
-                # INSTRUTOR DESTA AULA
-                # =========================
-                cursor.execute("""
-                    SELECT nome
-                    FROM instrutores
-                    ORDER BY nome
-                """)
+                if turma_selecionada:
+                    st.divider()
 
-                instrutores_cadastrados = (
-                    cursor.fetchall()
-                )
-
-                nomes_instrutores = [
-                    instrutor[0]
-                    for instrutor in instrutores_cadastrados
-                ]
-
-                if len(nomes_instrutores) == 0:
-                    st.warning(
-                        "Nenhum instrutor cadastrado."
+                    st.markdown(
+                        f"## 🕐 {turma_selecionada[2]}"
+                    )
+                    st.caption(
+                        turma_selecionada[1]
                     )
 
-                    instrutor_aula = instrutor_padrao
+                    instrutor_padrao = (
+                        turma_selecionada[3]
+                    )
 
-                else:
-                    if instrutor_padrao in nomes_instrutores:
-                        indice_instrutor = nomes_instrutores.index(
-                            instrutor_padrao
+                    # =========================
+                    # INSTRUTOR DESTA AULA
+                    # =========================
+                    cursor.execute("""
+                        SELECT nome
+                        FROM instrutores
+                        ORDER BY nome
+                    """)
+
+                    instrutores_cadastrados = (
+                        cursor.fetchall()
+                    )
+
+                    nomes_instrutores = [
+                        instrutor[0]
+                        for instrutor in instrutores_cadastrados
+                    ]
+
+                    if len(nomes_instrutores) == 0:
+                        st.warning(
+                            "Nenhum instrutor cadastrado."
                         )
+                        instrutor_aula = instrutor_padrao
                     else:
-                        indice_instrutor = 0
+                        if instrutor_padrao in nomes_instrutores:
+                            indice_instrutor = (
+                                nomes_instrutores.index(
+                                    instrutor_padrao
+                                )
+                            )
+                        else:
+                            indice_instrutor = 0
 
-                    instrutor_aula = st.selectbox(
-                        "👨‍🏫 Instrutor desta aula",
-                        nomes_instrutores,
-                        index=indice_instrutor,
-                        key=(
-                            f"instrutor_aula_"
-                            f"{turma_id_presenca}_"
-                            f"{data_aula}"
-                        )
-                    )
-
-                # =========================
-                # ALUNOS FIXOS
-                # =========================
-                cursor.execute("""
-                    SELECT id, nome
-                    FROM alunos
-                    WHERE turma_id = ?
-                    ORDER BY nome
-                """, (
-                    turma_id_presenca,
-                ))
-
-                alunos_turma = cursor.fetchall()
-
-                # =========================
-                # REPOSIÇÕES AGENDADAS
-                # =========================
-                cursor.execute("""
-                    SELECT
-                        a.id,
-                        a.nome,
-                        r.id
-                    FROM reposicoes r
-                    INNER JOIN alunos a
-                        ON r.aluno_id = a.id
-                    WHERE r.turma_reposicao_id = ?
-                    AND r.data_reposicao = ?
-                    AND r.status = 'Agendada'
-                    ORDER BY a.nome
-                """, (
-                    turma_id_presenca,
-                    str(data_aula)
-                ))
-
-                alunos_reposicao = (
-                    cursor.fetchall()
-                )
-
-                if (
-                    len(alunos_turma) == 0
-                    and len(alunos_reposicao) == 0
-                ):
-                    st.warning(
-                        "Não há alunos cadastrados "
-                        "ou reposições agendadas "
-                        "nessa turma."
-                    )
-
-                else:
-                    st.subheader("Alunos")
-
-                    presencas_marcadas = []
-
-                    # =========================
-                    # ALUNOS DA TURMA
-                    # =========================
-                    for aluno in alunos_turma:
-                        aluno_id = aluno[0]
-                        aluno_nome = aluno[1]
-
-                        status = st.radio(
-                            aluno_nome,
-                            [
-                                "Presente",
-                                "Falta",
-                                "Ausência justificada"
-                            ],
-                            horizontal=True,
+                        instrutor_aula = st.selectbox(
+                            "👨‍🏫 Instrutor desta aula",
+                            nomes_instrutores,
+                            index=indice_instrutor,
                             key=(
-                                f"presenca_"
+                                f"instrutor_aula_"
                                 f"{turma_id_presenca}_"
-                                f"{aluno_id}_"
                                 f"{data_aula}"
                             )
                         )
 
-                        motivo_ausencia = ""
+                    # =========================
+                    # ALUNOS FIXOS
+                    # =========================
+                    cursor.execute("""
+                        SELECT id, nome
+                        FROM alunos
+                        WHERE turma_id = ?
+                        ORDER BY nome
+                    """, (
+                        turma_id_presenca,
+                    ))
 
-                        if status == "Ausência justificada":
-                            motivo_ausencia = st.text_input(
-                                "Motivo da ausência",
-                                placeholder=(
-                                    "Ex.: consulta médica, "
-                                    "mal-estar, viagem..."
-                                ),
+                    alunos_turma = cursor.fetchall()
+
+                    # =========================
+                    # REPOSIÇÕES AGENDADAS
+                    # =========================
+                    cursor.execute("""
+                        SELECT
+                            a.id,
+                            a.nome,
+                            r.id
+                        FROM reposicoes r
+                        INNER JOIN alunos a
+                            ON r.aluno_id = a.id
+                        WHERE r.turma_reposicao_id = ?
+                        AND r.data_reposicao = ?
+                        AND r.status = 'Agendada'
+                        ORDER BY a.nome
+                    """, (
+                        turma_id_presenca,
+                        str(data_aula)
+                    ))
+
+                    alunos_reposicao = (
+                        cursor.fetchall()
+                    )
+
+                    if (
+                        len(alunos_turma) == 0
+                        and len(alunos_reposicao) == 0
+                    ):
+                        st.warning(
+                            "Não há alunos cadastrados "
+                            "ou reposições agendadas "
+                            "nessa turma."
+                        )
+                    else:
+                        st.subheader("Alunos")
+
+                        presencas_marcadas = []
+
+                        # =========================
+                        # ALUNOS DA TURMA
+                        # =========================
+                        for aluno in alunos_turma:
+                            aluno_id = aluno[0]
+                            aluno_nome = aluno[1]
+
+                            status = st.radio(
+                                aluno_nome,
+                                [
+                                    "Presente",
+                                    "Falta",
+                                    "Ausência justificada"
+                                ],
+                                horizontal=True,
                                 key=(
-                                    f"motivo_ausencia_"
+                                    f"presenca_"
                                     f"{turma_id_presenca}_"
                                     f"{aluno_id}_"
                                     f"{data_aula}"
                                 )
                             )
 
-                        presencas_marcadas.append(
-                            (
-                                aluno_id,
-                                turma_id_presenca,
-                                str(data_aula),
-                                status,
-                                None,
-                                motivo_ausencia
-                            )
-                        )
-                    # =========================
-                    # ALUNOS DE REPOSIÇÃO
-                    # =========================
-                    if len(alunos_reposicao) > 0:
-                        st.markdown(
-                            "### 🔄 Reposições agendadas"
-                        )
+                            motivo_ausencia = ""
 
-                        for reposicao in alunos_reposicao:
-                            aluno_id = reposicao[0]
-                            aluno_nome = reposicao[1]
-                            reposicao_id = reposicao[2]
-
-                            status = st.radio(
-                                f"🔄 {aluno_nome}",
-                                [
-                                    "Reposição",
-                                    "Não compareceu"
-                                ],
-                                horizontal=True,
-                                key=(
-                                    f"reposicao_chamada_"
-                                    f"{reposicao_id}_"
-                                    f"{data_aula}"
+                            if status == "Ausência justificada":
+                                motivo_ausencia = st.text_input(
+                                    "Motivo da ausência",
+                                    placeholder=(
+                                        "Ex.: consulta médica, "
+                                        "mal-estar, viagem..."
+                                    ),
+                                    key=(
+                                        f"motivo_ausencia_"
+                                        f"{turma_id_presenca}_"
+                                        f"{aluno_id}_"
+                                        f"{data_aula}"
+                                    )
                                 )
-                            )
 
                             presencas_marcadas.append(
                                 (
@@ -2983,217 +3279,231 @@ elif menu == "✅ Presenças":
                                     turma_id_presenca,
                                     str(data_aula),
                                     status,
-                                    reposicao_id
+                                    None,
+                                    motivo_ausencia
                                 )
                             )
 
-                    # =========================
-                    # SALVAR CHAMADA
-                    # =========================
-                    if st.button(
-                        "Salvar chamada",
-                        key=(
-                            f"salvar_chamada_"
-                            f"{turma_id_presenca}_"
-                            f"{data_aula}"
-                        )
-                    ):
-                        for presenca in presencas_marcadas:
-                            aluno_id = presenca[0]
-                            turma_id = presenca[1]
-                            data = presenca[2]
-                            status = presenca[3]
-
-                            # =========================
-                            # DADOS EXTRAS
-                            # =========================
-                            reposicao_id = None
-                            motivo_ausencia = ""
-
-                            if len(presenca) > 4:
-                                reposicao_id = presenca[4]
-
-                            if len(presenca) > 5:
-                                motivo_ausencia = (
-                                    presenca[5]
-                                    or ""
-                                )
-
-                            # =========================
-                            # VERIFICA SE A PRESENÇA
-                            # JÁ EXISTE
-                            # =========================
-                            cursor.execute("""
-                                SELECT id
-                                FROM presencas
-                                WHERE aluno_id = ?
-                                AND turma_id = ?
-                                AND data = ?
-                            """, (
-                                aluno_id,
-                                turma_id,
-                                data
-                            ))
-
-                            presenca_existente = (
-                                cursor.fetchone()
+                        # =========================
+                        # ALUNOS DE REPOSIÇÃO
+                        # =========================
+                        if len(alunos_reposicao) > 0:
+                            st.markdown(
+                                "### 🔄 Reposições agendadas"
                             )
 
-                            # =========================
-                            # ATUALIZA PRESENÇA
-                            # =========================
-                            if presenca_existente:
+                            for reposicao in alunos_reposicao:
+                                aluno_id = reposicao[0]
+                                aluno_nome = reposicao[1]
+                                reposicao_id = reposicao[2]
+
+                                status = st.radio(
+                                    f"🔄 {aluno_nome}",
+                                    [
+                                        "Reposição",
+                                        "Não compareceu"
+                                    ],
+                                    horizontal=True,
+                                    key=(
+                                        f"reposicao_chamada_"
+                                        f"{reposicao_id}_"
+                                        f"{data_aula}"
+                                    )
+                                )
+
+                                presencas_marcadas.append(
+                                    (
+                                        aluno_id,
+                                        turma_id_presenca,
+                                        str(data_aula),
+                                        status,
+                                        reposicao_id
+                                    )
+                                )
+
+                        # =========================
+                        # SALVAR CHAMADA
+                        # =========================
+                        if st.button(
+                            "✅ Salvar e finalizar chamada",
+                            key=(
+                                f"salvar_chamada_"
+                                f"{turma_id_presenca}_"
+                                f"{data_aula}"
+                            ),
+                            use_container_width=True
+                        ):
+                            for presenca in presencas_marcadas:
+                                aluno_id = presenca[0]
+                                turma_id = presenca[1]
+                                data = presenca[2]
+                                status = presenca[3]
+
+                                reposicao_id = None
+                                motivo_ausencia = ""
+
+                                if len(presenca) > 4:
+                                    reposicao_id = presenca[4]
+
+                                if len(presenca) > 5:
+                                    motivo_ausencia = (
+                                        presenca[5]
+                                        or ""
+                                    )
+
                                 cursor.execute("""
-                                    UPDATE presencas
-                                    SET
-                                        status = ?,
-                                        instrutor_aula = ?
-                                    WHERE id = ?
+                                    SELECT id
+                                    FROM presencas
+                                    WHERE aluno_id = ?
+                                    AND turma_id = ?
+                                    AND data = ?
                                 """, (
-                                    status,
-                                    instrutor_aula,
-                                    presenca_existente[0]
+                                    aluno_id,
+                                    turma_id,
+                                    data
                                 ))
 
-                            # =========================
-                            # NOVA PRESENÇA
-                            # =========================
-                            else:
-                                cursor.execute("""
-                                    INSERT INTO presencas
-                                    (
+                                presenca_existente = (
+                                    cursor.fetchone()
+                                )
+
+                                if presenca_existente:
+                                    cursor.execute("""
+                                        UPDATE presencas
+                                        SET
+                                            status = ?,
+                                            instrutor_aula = ?
+                                        WHERE id = ?
+                                    """, (
+                                        status,
+                                        instrutor_aula,
+                                        presenca_existente[0]
+                                    ))
+                                else:
+                                    cursor.execute("""
+                                        INSERT INTO presencas
+                                        (
+                                            aluno_id,
+                                            turma_id,
+                                            data,
+                                            status,
+                                            instrutor_aula
+                                        )
+                                        VALUES (?, ?, ?, ?, ?)
+                                    """, (
                                         aluno_id,
                                         turma_id,
                                         data,
                                         status,
                                         instrutor_aula
-                                    )
-                                    VALUES (?, ?, ?, ?, ?)
-                                """, (
-                                    aluno_id,
-                                    turma_id,
-                                    data,
-                                    status,
-                                    instrutor_aula
-                                ))
+                                    ))
 
-                            # =========================
-                            # AUSÊNCIA JUSTIFICADA
-                            # CRIA REPOSIÇÃO AUTOMÁTICA
-                            # =========================
-                            if status == "Ausência justificada":
-
-                                cursor.execute("""
-                                    SELECT id
-                                    FROM reposicoes
-                                    WHERE aluno_id = ?
-                                    AND data_falta = ?
-                                    LIMIT 1
-                                """, (
-                                    aluno_id,
-                                    data
-                                ))
-
-                                reposicao_ausencia = (
-                                    cursor.fetchone()
-                                )
-
-                                # Ainda não existe reposição
-                                if reposicao_ausencia is None:
-
+                                # =========================
+                                # AUSÊNCIA JUSTIFICADA
+                                # =========================
+                                if status == "Ausência justificada":
                                     cursor.execute("""
-                                        INSERT INTO reposicoes
-                                        (
-                                            aluno_id,
-                                            data_falta,
-                                            motivo,
-                                            direito_reposicao,
-                                            data_reposicao,
-                                            status,
-                                            turma_reposicao_id,
-                                            observacao
-                                        )
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        SELECT id
+                                        FROM reposicoes
+                                        WHERE aluno_id = ?
+                                        AND data_falta = ?
+                                        LIMIT 1
                                     """, (
                                         aluno_id,
-                                        data,
-                                        motivo_ausencia,
-                                        "Sim",
-                                        None,
-                                        "Pendente",
-                                        None,
-                                        (
-                                            "Gerada automaticamente "
-                                            "pela chamada"
-                                        )
+                                        data
                                     ))
 
-                                # Já existe:
-                                # atualiza o motivo
-                                else:
+                                    reposicao_ausencia = (
+                                        cursor.fetchone()
+                                    )
+
+                                    if reposicao_ausencia is None:
+                                        cursor.execute("""
+                                            INSERT INTO reposicoes
+                                            (
+                                                aluno_id,
+                                                data_falta,
+                                                motivo,
+                                                direito_reposicao,
+                                                data_reposicao,
+                                                status,
+                                                turma_reposicao_id,
+                                                observacao
+                                            )
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            aluno_id,
+                                            data,
+                                            motivo_ausencia,
+                                            "Sim",
+                                            None,
+                                            "Pendente",
+                                            None,
+                                            "Gerada automaticamente pela chamada"
+                                        ))
+                                    else:
+                                        cursor.execute("""
+                                            UPDATE reposicoes
+                                            SET
+                                                motivo = ?,
+                                                direito_reposicao = 'Sim'
+                                            WHERE id = ?
+                                            AND status = 'Pendente'
+                                        """, (
+                                            motivo_ausencia,
+                                            reposicao_ausencia[0]
+                                        ))
+
+                                elif status in (
+                                    "Presente",
+                                    "Falta"
+                                ):
+                                    cursor.execute("""
+                                        DELETE FROM reposicoes
+                                        WHERE aluno_id = ?
+                                        AND data_falta = ?
+                                        AND status IN (
+                                            'Pendente',
+                                            'Agendada'
+                                        )
+                                    """, (
+                                        aluno_id,
+                                        data
+                                    ))
+
+                                # =========================
+                                # REPOSIÇÃO REALIZADA
+                                # =========================
+                                if (
+                                    reposicao_id is not None
+                                    and status == "Reposição"
+                                ):
                                     cursor.execute("""
                                         UPDATE reposicoes
-                                        SET
-                                            motivo = ?,
-                                            direito_reposicao = 'Sim'
+                                        SET status = 'Realizada'
                                         WHERE id = ?
-                                        AND status = 'Pendente'
                                     """, (
-                                        motivo_ausencia,
-                                        reposicao_ausencia[0]
+                                        reposicao_id,
                                     ))
 
-                            # =========================
-                            # SE CORRIGIR A CHAMADA
-                            # REMOVE REPOSIÇÃO AUTOMÁTICA
-                            # AINDA PENDENTE
-                            # =========================
-                            elif status in (
-                                "Presente",
-                                "Falta"
-                            ):
+                            conn.commit()
 
-                                cursor.execute("""
-                                    DELETE FROM reposicoes
-                                    WHERE aluno_id = ?
-                                    AND data_falta = ?
-                                    AND status IN (
-                                        'Pendente',
-                                        'Agendada'
-                                    )
-                                """, (
-                                    aluno_id,
-                                    data
-                                ))
+                            st.session_state[
+                                "turma_chamada_aberta"
+                            ] = None
 
-                            # =========================
-                            # REPOSIÇÃO REALIZADA
-                            # =========================
-                            if (
-                                reposicao_id is not None
-                                and status == "Reposição"
-                            ):
-                                cursor.execute("""
-                                    UPDATE reposicoes
-                                    SET status = 'Realizada'
-                                    WHERE id = ?
-                                """, (
-                                    reposicao_id,
-                                ))
+                            st.session_state[
+                                "mensagem_chamada"
+                            ] = (
+                                "✅ Chamada finalizada com sucesso!"
+                            )
 
-                        conn.commit()
+                            st.rerun()
 
-                        st.session_state[
-                            "mensagem_chamada"
-                        ] = (
-                            "✅ Chamada salva com sucesso!"
-                        )
-
-                        st.rerun()                            
     # =========================
     # ABA 2 - HISTÓRICO
     # =========================
-    with aba_historico:
+    elif secao_presencas == "📋 Histórico de presenças":
         st.subheader("Histórico de presenças")
 
         # =========================
