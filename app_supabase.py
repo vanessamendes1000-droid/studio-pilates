@@ -3400,13 +3400,17 @@ elif menu == "✅ Presenças":
 
                                 # =========================
                                 # AUSÊNCIA JUSTIFICADA
+                                # GARANTE REPOSIÇÃO PENDENTE
                                 # =========================
                                 if status == "Ausência justificada":
                                     cursor.execute("""
-                                        SELECT id
+                                        SELECT
+                                            id,
+                                            status
                                         FROM reposicoes
                                         WHERE aluno_id = ?
                                         AND data_falta = ?
+                                        ORDER BY id DESC
                                         LIMIT 1
                                     """, (
                                         aluno_id,
@@ -3417,6 +3421,8 @@ elif menu == "✅ Presenças":
                                         cursor.fetchone()
                                     )
 
+                                    # Não existe reposição para essa falta:
+                                    # cria automaticamente como Pendente.
                                     if reposicao_ausencia is None:
                                         cursor.execute("""
                                             INSERT INTO reposicoes
@@ -3441,14 +3447,21 @@ elif menu == "✅ Presenças":
                                             None,
                                             "Gerada automaticamente pela chamada"
                                         ))
-                                    else:
+
+                                    # Já existe, mas ainda não foi realizada:
+                                    # garante que volte para a fila de agendamento.
+                                    elif reposicao_ausencia[1] != "Realizada":
                                         cursor.execute("""
                                             UPDATE reposicoes
                                             SET
                                                 motivo = ?,
-                                                direito_reposicao = 'Sim'
+                                                direito_reposicao = 'Sim',
+                                                data_reposicao = NULL,
+                                                turma_reposicao_id = NULL,
+                                                status = 'Pendente',
+                                                observacao =
+                                                    'Gerada automaticamente pela chamada'
                                             WHERE id = ?
-                                            AND status = 'Pendente'
                                         """, (
                                             motivo_ausencia,
                                             reposicao_ausencia[0]
