@@ -3499,6 +3499,68 @@ elif menu == "✅ Presenças":
                                         reposicao_id,
                                     ))
 
+                            # =========================
+                            # CONFERÊNCIA FINAL
+                            # GARANTE QUE TODA AUSÊNCIA
+                            # JUSTIFICADA TENHA REPOSIÇÃO
+                            # =========================
+                            cursor.execute("""
+                                UPDATE reposicoes r
+                                SET
+                                    direito_reposicao = 'Sim',
+                                    data_reposicao = NULL,
+                                    turma_reposicao_id = NULL,
+                                    status = 'Pendente',
+                                    observacao =
+                                        'Gerada automaticamente pela chamada'
+                                FROM presencas p
+                                WHERE r.aluno_id = p.aluno_id
+                                AND r.data_falta = p.data
+                                AND p.turma_id = ?
+                                AND p.data = ?
+                                AND p.status = 'Ausência justificada'
+                                AND r.status <> 'Realizada'
+                            """, (
+                                turma_id_presenca,
+                                str(data_aula)
+                            ))
+
+                            cursor.execute("""
+                                INSERT INTO reposicoes
+                                (
+                                    aluno_id,
+                                    data_falta,
+                                    motivo,
+                                    direito_reposicao,
+                                    data_reposicao,
+                                    status,
+                                    turma_reposicao_id,
+                                    observacao
+                                )
+                                SELECT
+                                    p.aluno_id,
+                                    p.data,
+                                    'Ausência justificada',
+                                    'Sim',
+                                    NULL,
+                                    'Pendente',
+                                    NULL,
+                                    'Gerada automaticamente pela chamada'
+                                FROM presencas p
+                                WHERE p.turma_id = ?
+                                AND p.data = ?
+                                AND p.status = 'Ausência justificada'
+                                AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM reposicoes r
+                                    WHERE r.aluno_id = p.aluno_id
+                                    AND r.data_falta = p.data
+                                )
+                            """, (
+                                turma_id_presenca,
+                                str(data_aula)
+                            ))
+
                             conn.commit()
 
                             st.session_state[
