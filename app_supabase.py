@@ -658,6 +658,203 @@ if menu == "🏠 Início":
     )
 
     # =========================
+    # ALERTA DE CHAMADAS PENDENTES
+    # NO TOPO DA PÁGINA INÍCIO
+    # Conta somente a partir de 10/11/2026
+    # =========================
+    data_inicio_alerta_chamadas = date(
+        2026,
+        11,
+        10
+    )
+
+    chamadas_pendentes_anteriores = []
+
+    ontem_alerta = hoje - timedelta(days=1)
+
+    # Dias sem aula usados somente neste alerta
+    cursor.execute("""
+        SELECT data
+        FROM dias_sem_aula
+    """)
+
+    dias_sem_aula_alerta_banco = (
+        cursor.fetchall()
+    )
+
+    dias_sem_aula_alerta = set()
+
+    for dia_alerta in dias_sem_aula_alerta_banco:
+        try:
+            dias_sem_aula_alerta.add(
+                datetime.strptime(
+                    str(dia_alerta[0]),
+                    "%Y-%m-%d"
+                ).date()
+            )
+        except Exception:
+            pass
+
+    if ontem_alerta >= data_inicio_alerta_chamadas:
+
+        cursor.execute("""
+            SELECT
+                t.id,
+                t.dias,
+                t.horario,
+                COUNT(a.id) AS total_alunos
+            FROM turmas t
+            LEFT JOIN alunos a
+                ON a.turma_id = t.id
+            GROUP BY
+                t.id,
+                t.dias,
+                t.horario
+            ORDER BY
+                t.horario,
+                t.dias
+        """)
+
+        turmas_alerta_chamada = (
+            cursor.fetchall()
+        )
+
+        cursor.execute("""
+            SELECT DISTINCT
+                turma_id,
+                data
+            FROM presencas
+            WHERE data BETWEEN ? AND ?
+        """, (
+            str(data_inicio_alerta_chamadas),
+            str(ontem_alerta)
+        ))
+
+        chamadas_registradas_banco = (
+            cursor.fetchall()
+        )
+
+        chamadas_registradas = {
+            (
+                registro[0],
+                str(registro[1])
+            )
+            for registro
+            in chamadas_registradas_banco
+        }
+
+        data_verificacao = (
+            data_inicio_alerta_chamadas
+        )
+
+        while data_verificacao <= ontem_alerta:
+
+            if (
+                data_verificacao
+                not in dias_sem_aula_alerta
+            ):
+                for turma_alerta in (
+                    turmas_alerta_chamada
+                ):
+                    turma_id_alerta = (
+                        turma_alerta[0]
+                    )
+
+                    dias_turma_alerta = (
+                        turma_alerta[1]
+                    )
+
+                    horario_turma_alerta = (
+                        turma_alerta[2]
+                    )
+
+                    total_alunos_alerta = (
+                        turma_alerta[3]
+                        or 0
+                    )
+
+                    if total_alunos_alerta == 0:
+                        continue
+
+                    dias_semana_turma = (
+                        obter_dias_semana(
+                            dias_turma_alerta
+                        )
+                    )
+
+                    if (
+                        data_verificacao.weekday()
+                        not in dias_semana_turma
+                    ):
+                        continue
+
+                    chave_chamada = (
+                        turma_id_alerta,
+                        str(data_verificacao)
+                    )
+
+                    if (
+                        chave_chamada
+                        not in chamadas_registradas
+                    ):
+                        chamadas_pendentes_anteriores.append(
+                            (
+                                data_verificacao,
+                                dias_turma_alerta,
+                                horario_turma_alerta
+                            )
+                        )
+
+            data_verificacao += timedelta(
+                days=1
+            )
+
+    if len(chamadas_pendentes_anteriores) > 0:
+
+        st.warning(
+            f"⚠️ Existem "
+            f"{len(chamadas_pendentes_anteriores)} "
+            f"chamada(s) de dias anteriores "
+            f"ainda não realizada(s)."
+        )
+
+        with st.expander(
+            "🔎 Ver chamadas pendentes",
+            expanded=False
+        ):
+            chamadas_pendentes_anteriores.sort(
+                key=lambda item: (
+                    item[0],
+                    item[2] or ""
+                ),
+                reverse=True
+            )
+
+            for chamada_pendente in (
+                chamadas_pendentes_anteriores
+            ):
+                data_pendente = (
+                    chamada_pendente[0]
+                )
+
+                dias_pendente = (
+                    chamada_pendente[1]
+                )
+
+                horario_pendente = (
+                    chamada_pendente[2]
+                )
+
+                st.write(
+                    f"📅 "
+                    f"{data_pendente.strftime('%d/%m/%Y')} "
+                    f"| 🕐 {horario_pendente} "
+                    f"| {dias_pendente}"
+                )
+
+        st.divider()
+
+    # =========================
     # ALUNOS E VAGAS
     # =========================
 
@@ -5787,151 +5984,103 @@ elif menu == "🔄 Reposições":
                     "mensagem_reposicao_excluida"
                 ]
 
-            def mostrar_reposicao_compacta(
-                reposicao,
+            def agrupar_por_aluno(lista_reposicoes):
+                grupos = {}
+
+                for reposicao in lista_reposicoes:
+                    nome = reposicao[1]
+
+                    if nome not in grupos:
+                        grupos[nome] = []
+
+                    grupos[nome].append(reposicao)
+
+                return dict(
+                    sorted(
+                        grupos.items(),
+                        key=lambda item: item[0].lower()
+                    )
+                )
+
+            def mostrar_grupo_aluno(
+                nome,
+                lista_aluno,
                 status_texto
             ):
-                with st.container(border=True):
-                    nome = reposicao[1]
-                    data_falta = reposicao[2]
-                    motivo = reposicao[3] or ""
-                    direito = reposicao[4]
-                    data_reposicao = reposicao[5]
-                    dias_reposicao = reposicao[7]
-                    horario_reposicao = reposicao[8]
-                    observacao = reposicao[9] or ""
+                quantidade = len(lista_aluno)
 
-                    st.markdown(
-                        f"**{nome}**"
-                    )
+                with st.expander(
+                    f"{nome} ({quantidade})",
+                    expanded=False
+                ):
+                    for indice, reposicao in enumerate(
+                        lista_aluno,
+                        start=1
+                    ):
+                        data_falta = reposicao[2]
+                        motivo = reposicao[3] or ""
+                        data_reposicao = reposicao[5]
+                        dias_reposicao = reposicao[7]
+                        horario_reposicao = reposicao[8]
+                        observacao = reposicao[9] or ""
 
-                    st.caption(
-                        f"Falta: {data_falta}"
-                    )
-
-                    st.caption(
-                        f"Direito: {direito} | "
-                        f"{status_texto}"
-                    )
-
-                    if motivo:
-                        st.caption(
-                            f"Motivo: {motivo}"
+                        # Linha principal bem compacta
+                        linha = (
+                            f"**{indice}. Falta:** {data_falta}"
                         )
 
-                    if data_reposicao:
-                        st.caption(
-                            f"Reposição: {data_reposicao}"
-                        )
-
-                    if dias_reposicao:
-                        st.caption(
-                            f"Turma: {dias_reposicao} - "
-                            f"{horario_reposicao or ''}"
-                        )
-
-                    if observacao:
-                        st.caption(
-                            f"Obs.: {observacao}"
-                        )
-
-                    # =========================
-                    # REPOSIÇÃO AGENDADA
-                    # PERMITE EDITAR OU CANCELAR
-                    # =========================
-                    if reposicao[6] == "Agendada":
-                        with st.expander(
-                            "✏️ Editar agendamento",
-                            expanded=False
-                        ):
-                            try:
-                                data_atual_edicao = (
-                                    datetime.strptime(
-                                        str(data_reposicao),
-                                        "%Y-%m-%d"
-                                    ).date()
-                                    if data_reposicao
-                                    else date.today()
-                                )
-                            except Exception:
-                                data_atual_edicao = date.today()
-
-                            nova_data_reposicao = st.date_input(
-                                "Data da reposição",
-                                value=data_atual_edicao,
-                                key=(
-                                    f"editar_data_reposicao_"
-                                    f"{reposicao[0]}"
-                                )
+                        if data_reposicao:
+                            linha += (
+                                f" | **Reposição:** "
+                                f"{data_reposicao}"
                             )
 
-                            labels_turmas = list(
-                                opcoes_turmas_edicao_reposicao.keys()
+                        st.markdown(linha)
+
+                        # Detalhes em uma única linha menor
+                        detalhes = []
+
+                        if motivo:
+                            detalhes.append(
+                                f"Motivo: {motivo}"
                             )
 
-                            indice_turma_atual = 0
-
-                            for indice, label_turma in enumerate(
-                                labels_turmas
-                            ):
-                                if (
-                                    opcoes_turmas_edicao_reposicao[
-                                        label_turma
-                                    ]
-                                    == reposicao[10]
-                                ):
-                                    indice_turma_atual = indice
-                                    break
-
-                            if labels_turmas:
-                                nova_turma_reposicao = st.selectbox(
-                                    "Turma / horário",
-                                    labels_turmas,
-                                    index=indice_turma_atual,
-                                    key=(
-                                        f"editar_turma_reposicao_"
-                                        f"{reposicao[0]}"
-                                    )
-                                )
-
-                                nova_turma_reposicao_id = (
-                                    opcoes_turmas_edicao_reposicao[
-                                        nova_turma_reposicao
-                                    ]
-                                )
-                            else:
-                                nova_turma_reposicao_id = None
-
-                            nova_observacao = st.text_area(
-                                "Observação",
-                                value=observacao,
-                                key=(
-                                    f"editar_observacao_reposicao_"
-                                    f"{reposicao[0]}"
-                                )
+                        if dias_reposicao:
+                            detalhes.append(
+                                f"Turma: {dias_reposicao} - "
+                                f"{horario_reposicao or ''}"
                             )
 
+                        if observacao:
+                            detalhes.append(
+                                f"Obs.: {observacao}"
+                            )
+
+                        if detalhes:
+                            st.caption(
+                                " • ".join(detalhes)
+                            )
+
+                        # =========================
+                        # PENDENTE:
+                        # EXCLUIR QUANDO O ALUNO
+                        # OPTAR POR NÃO REPOR
+                        # =========================
+                        if reposicao[6] == "Pendente":
                             if st.button(
-                                "💾 Salvar alterações",
+                                "🗑️ Excluir reposição",
                                 key=(
-                                    f"salvar_edicao_reposicao_"
+                                    f"excluir_reposicao_pendente_"
                                     f"{reposicao[0]}"
                                 ),
                                 use_container_width=True
                             ):
                                 cursor.execute("""
-                                    UPDATE reposicoes
-                                    SET
-                                        data_reposicao = ?,
-                                        turma_reposicao_id = ?,
-                                        observacao = ?,
-                                        status = 'Agendada'
+                                    DELETE FROM reposicoes
                                     WHERE id = ?
+                                    AND status = 'Pendente'
                                 """, (
-                                    str(nova_data_reposicao),
-                                    nova_turma_reposicao_id,
-                                    nova_observacao,
-                                    reposicao[0]
+                                    reposicao[0],
                                 ))
 
                                 conn.commit()
@@ -5939,41 +6088,193 @@ elif menu == "🔄 Reposições":
                                 st.session_state[
                                     "mensagem_reposicao_editada"
                                 ] = (
-                                    "✅ Agendamento atualizado "
+                                    "✅ Reposição excluída "
                                     "com sucesso!"
                                 )
 
                                 st.rerun()
 
-                        if st.button(
-                            "↩️ Cancelar agendamento",
-                            key=(
-                                f"cancelar_agendamento_"
+                        # =========================
+                        # AGENDADA:
+                        # EDITAR OU CANCELAR
+                        # =========================
+                        if reposicao[6] == "Agendada":
+                            chave_edicao = (
+                                f"editar_reposicao_aberta_"
                                 f"{reposicao[0]}"
-                            ),
-                            use_container_width=True
-                        ):
-                            cursor.execute("""
-                                UPDATE reposicoes
-                                SET
-                                    data_reposicao = NULL,
-                                    turma_reposicao_id = NULL,
-                                    status = 'Pendente'
-                                WHERE id = ?
-                            """, (
-                                reposicao[0],
-                            ))
-
-                            conn.commit()
-
-                            st.session_state[
-                                "mensagem_reposicao_editada"
-                            ] = (
-                                "✅ Agendamento cancelado. "
-                                "A reposição voltou para Pendentes."
                             )
 
-                            st.rerun()
+                            if chave_edicao not in st.session_state:
+                                st.session_state[chave_edicao] = False
+
+                            col_editar, col_cancelar = st.columns(2)
+
+                            with col_editar:
+                                if st.button(
+                                    "✏️ Editar",
+                                    key=(
+                                        f"abrir_edicao_reposicao_"
+                                        f"{reposicao[0]}"
+                                    ),
+                                    use_container_width=True
+                                ):
+                                    st.session_state[
+                                        chave_edicao
+                                    ] = not st.session_state[
+                                        chave_edicao
+                                    ]
+
+                            with col_cancelar:
+                                if st.button(
+                                    "↩️ Cancelar",
+                                    key=(
+                                        f"cancelar_agendamento_"
+                                        f"{reposicao[0]}"
+                                    ),
+                                    use_container_width=True
+                                ):
+                                    cursor.execute("""
+                                        UPDATE reposicoes
+                                        SET
+                                            data_reposicao = NULL,
+                                            turma_reposicao_id = NULL,
+                                            status = 'Pendente'
+                                        WHERE id = ?
+                                    """, (
+                                        reposicao[0],
+                                    ))
+
+                                    conn.commit()
+
+                                    st.session_state[
+                                        "mensagem_reposicao_editada"
+                                    ] = (
+                                        "✅ Agendamento cancelado. "
+                                        "A reposição voltou para Pendentes."
+                                    )
+
+                                    st.rerun()
+
+                            if st.session_state[chave_edicao]:
+                                try:
+                                    data_atual_edicao = (
+                                        datetime.strptime(
+                                            str(data_reposicao),
+                                            "%Y-%m-%d"
+                                        ).date()
+                                        if data_reposicao
+                                        else date.today()
+                                    )
+                                except Exception:
+                                    data_atual_edicao = date.today()
+
+                                nova_data_reposicao = st.date_input(
+                                    "Data",
+                                    value=data_atual_edicao,
+                                    key=(
+                                        f"editar_data_reposicao_"
+                                        f"{reposicao[0]}"
+                                    )
+                                )
+
+                                labels_turmas = list(
+                                    opcoes_turmas_edicao_reposicao.keys()
+                                )
+
+                                indice_turma_atual = 0
+
+                                for indice_turma, label_turma in enumerate(
+                                    labels_turmas
+                                ):
+                                    if (
+                                        opcoes_turmas_edicao_reposicao[
+                                            label_turma
+                                        ]
+                                        == reposicao[10]
+                                    ):
+                                        indice_turma_atual = indice_turma
+                                        break
+
+                                if labels_turmas:
+                                    nova_turma_reposicao = st.selectbox(
+                                        "Turma / horário",
+                                        labels_turmas,
+                                        index=indice_turma_atual,
+                                        key=(
+                                            f"editar_turma_reposicao_"
+                                            f"{reposicao[0]}"
+                                        )
+                                    )
+
+                                    nova_turma_reposicao_id = (
+                                        opcoes_turmas_edicao_reposicao[
+                                            nova_turma_reposicao
+                                        ]
+                                    )
+                                else:
+                                    nova_turma_reposicao_id = None
+
+                                nova_observacao = st.text_input(
+                                    "Observação",
+                                    value=observacao,
+                                    key=(
+                                        f"editar_observacao_reposicao_"
+                                        f"{reposicao[0]}"
+                                    )
+                                )
+
+                                if st.button(
+                                    "💾 Salvar",
+                                    key=(
+                                        f"salvar_edicao_reposicao_"
+                                        f"{reposicao[0]}"
+                                    ),
+                                    use_container_width=True
+                                ):
+                                    cursor.execute("""
+                                        UPDATE reposicoes
+                                        SET
+                                            data_reposicao = ?,
+                                            turma_reposicao_id = ?,
+                                            observacao = ?,
+                                            status = 'Agendada'
+                                        WHERE id = ?
+                                    """, (
+                                        str(nova_data_reposicao),
+                                        nova_turma_reposicao_id,
+                                        nova_observacao,
+                                        reposicao[0]
+                                    ))
+
+                                    conn.commit()
+
+                                    st.session_state[
+                                        "mensagem_reposicao_editada"
+                                    ] = (
+                                        "✅ Agendamento atualizado "
+                                        "com sucesso!"
+                                    )
+
+                                    st.session_state[
+                                        chave_edicao
+                                    ] = False
+
+                                    st.rerun()
+
+                        if indice < quantidade:
+                            st.divider()
+
+            grupos_pendentes = agrupar_por_aluno(
+                reposicoes_pendentes
+            )
+
+            grupos_agendadas = agrupar_por_aluno(
+                reposicoes_agendadas
+            )
+
+            grupos_realizadas = agrupar_por_aluno(
+                reposicoes_realizadas
+            )
 
             col_pendentes, col_agendadas, col_realizadas = (
                 st.columns(3)
@@ -5990,9 +6291,10 @@ elif menu == "🔄 Reposições":
                         "Nenhuma pendente."
                     )
                 else:
-                    for reposicao in reposicoes_pendentes:
-                        mostrar_reposicao_compacta(
-                            reposicao,
+                    for nome, lista_aluno in grupos_pendentes.items():
+                        mostrar_grupo_aluno(
+                            nome,
+                            lista_aluno,
                             "🔴 Pendente"
                         )
 
@@ -6007,9 +6309,10 @@ elif menu == "🔄 Reposições":
                         "Nenhuma agendada."
                     )
                 else:
-                    for reposicao in reposicoes_agendadas:
-                        mostrar_reposicao_compacta(
-                            reposicao,
+                    for nome, lista_aluno in grupos_agendadas.items():
+                        mostrar_grupo_aluno(
+                            nome,
+                            lista_aluno,
                             "🟠 Agendada"
                         )
 
@@ -6024,9 +6327,10 @@ elif menu == "🔄 Reposições":
                         "Nenhuma realizada."
                     )
                 else:
-                    for reposicao in reposicoes_realizadas:
-                        mostrar_reposicao_compacta(
-                            reposicao,
+                    for nome, lista_aluno in grupos_realizadas.items():
+                        mostrar_grupo_aluno(
+                            nome,
+                            lista_aluno,
                             "🟢 Realizada"
                         )
 
