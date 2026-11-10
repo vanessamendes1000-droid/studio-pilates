@@ -4191,7 +4191,7 @@ elif menu == "💰 Financeiro":
                 "Crédito"
             ]:
                 taxa_percentual = st.number_input(
-                    "Taxa do cartão (%)",
+                    "Taxa do cartão (R$)",
                     min_value=0.0,
                     max_value=100.0,
                     value=0.0,
