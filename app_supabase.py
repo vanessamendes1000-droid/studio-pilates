@@ -5613,462 +5613,217 @@ elif menu == "🔄 Reposições":
 
     conn.commit()
 
-    aba_agendar, aba_lista = st.tabs(
-        [
-            "📅 Agendar reposição",
-            "📋 Reposições registradas"
+    st.subheader("Reposições registradas")
+
+    cursor.execute("""
+        SELECT
+            r.id,
+            a.nome,
+            r.data_falta,
+            r.motivo,
+            r.direito_reposicao,
+            r.data_reposicao,
+            r.status,
+            t.dias,
+            t.horario,
+            r.observacao,
+            r.turma_reposicao_id
+        FROM reposicoes r
+        INNER JOIN alunos a
+            ON r.aluno_id = a.id
+        LEFT JOIN turmas t
+            ON r.turma_reposicao_id = t.id
+        ORDER BY r.id DESC
+    """)
+
+    reposicoes = cursor.fetchall()
+
+    # Turmas disponíveis para editar agendamentos
+    cursor.execute("""
+        SELECT
+            id,
+            dias,
+            horario,
+            instrutor
+        FROM turmas
+        ORDER BY dias, horario
+    """)
+
+    turmas_edicao_reposicao = cursor.fetchall()
+
+    opcoes_turmas_edicao_reposicao = {
+        (
+            f"{t[1]} - {t[2]} | "
+            f"Instrutor: {t[3]}"
+        ): t[0]
+        for t in turmas_edicao_reposicao
+    }
+
+    if len(reposicoes) == 0:
+        st.info(
+            "Nenhuma reposição registrada."
+        )
+
+    else:
+        reposicoes_pendentes = [
+            reposicao
+            for reposicao in reposicoes
+            if reposicao[6] == "Pendente"
         ]
-    )
 
-    # =========================
-    # ABA 1 - AGENDAR REPOSIÇÃO
-    # =========================
-    with aba_agendar:
-        st.subheader("Agendar reposição")
+        reposicoes_agendadas = [
+            reposicao
+            for reposicao in reposicoes
+            if reposicao[6] == "Agendada"
+        ]
 
-        cursor.execute("""
-            SELECT
-                r.id,
-                a.nome,
-                r.data_falta,
-                r.motivo
-            FROM reposicoes r
-            INNER JOIN alunos a
-                ON r.aluno_id = a.id
-            WHERE r.direito_reposicao = 'Sim'
-            AND r.status = 'Pendente'
-            ORDER BY r.data_falta, a.nome
-        """)
+        reposicoes_realizadas = [
+            reposicao
+            for reposicao in reposicoes
+            if reposicao[6] == "Realizada"
+        ]
 
-        reposicoes_pendentes = cursor.fetchall()
-
-        if len(reposicoes_pendentes) == 0:
-            st.info(
-                "Nenhuma reposição pendente."
-            )
-
-        else:
-            opcoes_pendentes = {
-                (
-                    f"{r[1]} | "
-                    f"Falta: {r[2]} | "
-                    f"Motivo: {r[3] or 'Não informado'} | "
-                    f"ID {r[0]}"
-                ): r[0]
-                for r in reposicoes_pendentes
-            }
-
-            reposicao_escolhida = st.selectbox(
-                "Aluno / falta",
-                list(opcoes_pendentes.keys()),
-                key="agendar_reposicao_aluno"
-            )
-
-            reposicao_id = opcoes_pendentes[
-                reposicao_escolhida
-            ]
-
-            observacao = st.text_area(
-                "Observação da reposição",
-                placeholder=(
-                    "Ex.: reposição referente ao ciclo anterior, "
-                    "viagem, mal-estar..."
-                ),
-                key="reposicao_observacao"
-            )
-            # =========================
-            # VERIFICA REGRA DE REPOSIÇÕES
-            # =========================
-            cursor.execute("""
-                SELECT
-                    aluno_id,
-                    data_falta
-                FROM reposicoes
-                WHERE id = ?
-            """, (
-                reposicao_id,
-            ))
-
-            dados_reposicao_atual = cursor.fetchone()
-
-            inicio_ciclo_reposicao = None
-            fim_ciclo_reposicao = None
-            quantidade_outras_reposicoes = 0
-
-            if dados_reposicao_atual:
-                aluno_id_agendamento = dados_reposicao_atual[0]
-                data_falta_agendamento = dados_reposicao_atual[1]
-
-                cursor.execute("""
-                    SELECT
-                        COALESCE(
-                            data_inicio_ciclo,
-                            data_pagamento
-                        ),
-                        plano
-                    FROM financeiro
-                    WHERE aluno_id = ?
-                    AND COALESCE(
-                        data_inicio_ciclo,
-                        data_pagamento
-                    ) <= ?
-                    ORDER BY
-                        COALESCE(
-                            data_inicio_ciclo,
-                            data_pagamento
-                        ) DESC,
-                        id DESC
-                    LIMIT 1
-                """, (
-                    aluno_id_agendamento,
-                    data_falta_agendamento
-                ))
-
-                ciclo_reposicao = cursor.fetchone()
-
-                if ciclo_reposicao:
-                    inicio_ciclo_reposicao = datetime.strptime(
-                        ciclo_reposicao[0],
-                        "%Y-%m-%d"
-                    ).date()
-
-                    plano_reposicao = ciclo_reposicao[1] or "8 aulas"
-
-                    if "24" in str(plano_reposicao):
-                        aulas_ciclo_reposicao = 24
-                    else:
-                        aulas_ciclo_reposicao = 8
-
-                    cursor.execute("""
-                        SELECT turmas.dias
-                        FROM alunos
-                        LEFT JOIN turmas
-                            ON alunos.turma_id = turmas.id
-                        WHERE alunos.id = ?
-                    """, (
-                        aluno_id_agendamento,
-                    ))
-
-                    turma_ciclo = cursor.fetchone()
-
-                    if turma_ciclo:
-                        dias_ciclo_reposicao = turma_ciclo[0]
-
-                        cursor.execute("""
-                            SELECT data
-                            FROM dias_sem_aula
-                        """)
-
-                        dias_fechados_reposicao = set()
-
-                        for dia in cursor.fetchall():
-                            dias_fechados_reposicao.add(
-                                datetime.strptime(
-                                    dia[0],
-                                    "%Y-%m-%d"
-                                ).date()
-                            )
-
-                        fim_ciclo_reposicao = calcular_fim_ciclo(
-                            inicio_ciclo_reposicao,
-                            dias_ciclo_reposicao,
-                            aulas_ciclo_reposicao,
-                            dias_fechados_reposicao
-                        )
-
-                        if fim_ciclo_reposicao:
-                            cursor.execute("""
-                                SELECT COUNT(*)
-                                FROM reposicoes
-                                WHERE aluno_id = ?
-                                AND id <> ?
-                                AND direito_reposicao = 'Sim'
-                                AND data_falta BETWEEN ? AND ?
-                            """, (
-                                aluno_id_agendamento,
-                                reposicao_id,
-                                str(inicio_ciclo_reposicao),
-                                str(fim_ciclo_reposicao)
-                            ))
-
-                            quantidade_outras_reposicoes = (
-                                cursor.fetchone()[0] or 0
-                            )
-
-                            if quantidade_outras_reposicoes >= 2:
-                                st.warning(
-                                    "⚠️ Este aluno já possui 2 reposições "
-                                    "neste ciclo. Este agendamento será "
-                                    "considerado uma exceção."
-                                )
-
-            data_reposicao = st.date_input(
-                "Data da reposição",
-                key="agendar_data_reposicao"
-            )
-            if (
-                fim_ciclo_reposicao
-                and data_reposicao > fim_ciclo_reposicao
-            ):
-                st.warning(
-                    "⚠️ A data escolhida está fora do ciclo do aluno. "
-                    "Este agendamento será considerado uma exceção."
-                )
-
-            cursor.execute("""
-                SELECT
-                    id,
-                    dias,
-                    horario,
-                    instrutor
-                FROM turmas
-                ORDER BY dias, horario
-            """)
-
-            turmas_reposicao = cursor.fetchall()
-
-            if len(turmas_reposicao) == 0:
-                st.warning(
-                    "Nenhuma turma cadastrada."
-                )
-
-            else:
-                opcoes_turmas_reposicao = {
-                    (
-                        f"{t[1]} - {t[2]} | "
-                        f"Instrutor: {t[3]}"
-                    ): t[0]
-                    for t in turmas_reposicao
-                }
-
-                turma_reposicao = st.selectbox(
-                    "Turma onde fará a reposição",
-                    list(
-                        opcoes_turmas_reposicao.keys()
-                    ),
-                    key="agendar_turma_reposicao"
-                )
-
-                turma_reposicao_id = (
-                    opcoes_turmas_reposicao[
-                        turma_reposicao
-                    ]
-                )
-
-                if st.button(
-                    "Agendar reposição",
-                    key="botao_agendar_reposicao"
-                ):
-                    cursor.execute("""
-                        UPDATE reposicoes
-                        SET
-                            data_reposicao = ?,
-                            turma_reposicao_id = ?,
-                            observacao = ?,
-                            status = 'Agendada'
-                        WHERE id = ?
-                    """, (
-                        str(data_reposicao),
-                        turma_reposicao_id,
-                        observacao,
-                        reposicao_id
-                    ))
-
-                    conn.commit()
-
-                    st.success(
-                        "Reposição agendada com sucesso!"
-                    )
-
-                    st.rerun()
-
-    # =========================
-    # ABA 2 - REPOSIÇÕES REGISTRADAS
-    # =========================
-    with aba_lista:
-        st.subheader("Reposições registradas")
-
-        cursor.execute("""
-            SELECT
-                r.id,
-                a.nome,
-                r.data_falta,
-                r.motivo,
-                r.direito_reposicao,
-                r.data_reposicao,
-                r.status,
-                t.dias,
-                t.horario,
-                r.observacao,
-                r.turma_reposicao_id
-            FROM reposicoes r
-            INNER JOIN alunos a
-                ON r.aluno_id = a.id
-            LEFT JOIN turmas t
-                ON r.turma_reposicao_id = t.id
-            ORDER BY r.id DESC
-        """)
-
-        reposicoes = cursor.fetchall()
-
-        # Turmas disponíveis para editar agendamentos
-        cursor.execute("""
-            SELECT
-                id,
-                dias,
-                horario,
-                instrutor
-            FROM turmas
-            ORDER BY dias, horario
-        """)
-
-        turmas_edicao_reposicao = cursor.fetchall()
-
-        opcoes_turmas_edicao_reposicao = {
-            (
-                f"{t[1]} - {t[2]} | "
-                f"Instrutor: {t[3]}"
-            ): t[0]
-            for t in turmas_edicao_reposicao
-        }
-
-        if len(reposicoes) == 0:
-            st.info(
-                "Nenhuma reposição registrada."
-            )
-
-        else:
-            reposicoes_pendentes = [
-                reposicao
-                for reposicao in reposicoes
-                if reposicao[6] == "Pendente"
-            ]
-
-            reposicoes_agendadas = [
-                reposicao
-                for reposicao in reposicoes
-                if reposicao[6] == "Agendada"
-            ]
-
-            reposicoes_realizadas = [
-                reposicao
-                for reposicao in reposicoes
-                if reposicao[6] == "Realizada"
-            ]
-
-            if (
-                "mensagem_reposicao_editada"
-                in st.session_state
-            ):
-                st.success(
-                    st.session_state[
-                        "mensagem_reposicao_editada"
-                    ]
-                )
-
-                del st.session_state[
+        if (
+            "mensagem_reposicao_editada"
+            in st.session_state
+        ):
+            st.success(
+                st.session_state[
                     "mensagem_reposicao_editada"
                 ]
+            )
 
-            if (
-                "mensagem_reposicao_excluida"
-                in st.session_state
-            ):
-                st.success(
-                    st.session_state[
-                        "mensagem_reposicao_excluida"
-                    ]
-                )
+            del st.session_state[
+                "mensagem_reposicao_editada"
+            ]
 
-                del st.session_state[
+        if (
+            "mensagem_reposicao_excluida"
+            in st.session_state
+        ):
+            st.success(
+                st.session_state[
                     "mensagem_reposicao_excluida"
                 ]
+            )
 
-            def agrupar_por_aluno(lista_reposicoes):
-                grupos = {}
+            del st.session_state[
+                "mensagem_reposicao_excluida"
+            ]
 
-                for reposicao in lista_reposicoes:
-                    nome = reposicao[1]
+        def agrupar_por_aluno(lista_reposicoes):
+            grupos = {}
 
-                    if nome not in grupos:
-                        grupos[nome] = []
+            for reposicao in lista_reposicoes:
+                nome = reposicao[1]
 
-                    grupos[nome].append(reposicao)
+                if nome not in grupos:
+                    grupos[nome] = []
 
-                return dict(
-                    sorted(
-                        grupos.items(),
-                        key=lambda item: item[0].lower()
-                    )
+                grupos[nome].append(reposicao)
+
+            return dict(
+                sorted(
+                    grupos.items(),
+                    key=lambda item: item[0].lower()
                 )
+            )
 
-            def mostrar_grupo_aluno(
-                nome,
-                lista_aluno,
-                status_texto
+        def mostrar_grupo_aluno(
+            nome,
+            lista_aluno,
+            status_texto
+        ):
+            quantidade = len(lista_aluno)
+
+            with st.expander(
+                f"{nome} ({quantidade})",
+                expanded=False
             ):
-                quantidade = len(lista_aluno)
-
-                with st.expander(
-                    f"{nome} ({quantidade})",
-                    expanded=False
+                for indice, reposicao in enumerate(
+                    lista_aluno,
+                    start=1
                 ):
-                    for indice, reposicao in enumerate(
-                        lista_aluno,
-                        start=1
-                    ):
-                        data_falta = reposicao[2]
-                        motivo = reposicao[3] or ""
-                        data_reposicao = reposicao[5]
-                        dias_reposicao = reposicao[7]
-                        horario_reposicao = reposicao[8]
-                        observacao = reposicao[9] or ""
+                    data_falta = reposicao[2]
+                    motivo = reposicao[3] or ""
+                    data_reposicao = reposicao[5]
+                    dias_reposicao = reposicao[7]
+                    horario_reposicao = reposicao[8]
+                    observacao = reposicao[9] or ""
 
-                        # Linha principal bem compacta
-                        linha = (
-                            f"**{indice}. Falta:** {data_falta}"
+                    # Linha principal bem compacta
+                    linha = (
+                        f"**{indice}. Falta:** {data_falta}"
+                    )
+
+                    if data_reposicao:
+                        linha += (
+                            f" | **Reposição:** "
+                            f"{data_reposicao}"
                         )
 
-                        if data_reposicao:
-                            linha += (
-                                f" | **Reposição:** "
-                                f"{data_reposicao}"
-                            )
+                    st.markdown(linha)
 
-                        st.markdown(linha)
+                    # Detalhes em uma única linha menor
+                    detalhes = []
 
-                        # Detalhes em uma única linha menor
-                        detalhes = []
+                    if motivo:
+                        detalhes.append(
+                            f"Motivo: {motivo}"
+                        )
 
-                        if motivo:
-                            detalhes.append(
-                                f"Motivo: {motivo}"
-                            )
+                    if dias_reposicao:
+                        detalhes.append(
+                            f"Turma: {dias_reposicao} - "
+                            f"{horario_reposicao or ''}"
+                        )
 
-                        if dias_reposicao:
-                            detalhes.append(
-                                f"Turma: {dias_reposicao} - "
-                                f"{horario_reposicao or ''}"
-                            )
+                    if observacao:
+                        detalhes.append(
+                            f"Obs.: {observacao}"
+                        )
 
-                        if observacao:
-                            detalhes.append(
-                                f"Obs.: {observacao}"
-                            )
+                    if detalhes:
+                        st.caption(
+                            " • ".join(detalhes)
+                        )
 
-                        if detalhes:
-                            st.caption(
-                                " • ".join(detalhes)
-                            )
+                    # =========================
+                    # PENDENTE:
+                    # AGENDAR DIRETO NO QUADRO
+                    # OU EXCLUIR
+                    # =========================
+                    if reposicao[6] == "Pendente":
+                        chave_agendar = (
+                            f"agendar_reposicao_aberta_"
+                            f"{reposicao[0]}"
+                        )
 
-                        # =========================
-                        # PENDENTE:
-                        # EXCLUIR QUANDO O ALUNO
-                        # OPTAR POR NÃO REPOR
-                        # =========================
-                        if reposicao[6] == "Pendente":
+                        if chave_agendar not in st.session_state:
+                            st.session_state[
+                                chave_agendar
+                            ] = False
+
+                        col_agendar, col_excluir = st.columns(2)
+
+                        with col_agendar:
                             if st.button(
-                                "🗑️ Excluir reposição",
+                                "📅 Agendar",
+                                key=(
+                                    f"abrir_agendar_reposicao_"
+                                    f"{reposicao[0]}"
+                                ),
+                                use_container_width=True
+                            ):
+                                st.session_state[
+                                    chave_agendar
+                                ] = not st.session_state[
+                                    chave_agendar
+                                ]
+
+                        with col_excluir:
+                            if st.button(
+                                "🗑️ Excluir",
                                 key=(
                                     f"excluir_reposicao_pendente_"
                                     f"{reposicao[0]}"
@@ -6094,109 +5849,282 @@ elif menu == "🔄 Reposições":
 
                                 st.rerun()
 
-                        # =========================
-                        # AGENDADA:
-                        # EDITAR OU CANCELAR
-                        # =========================
-                        if reposicao[6] == "Agendada":
-                            chave_edicao = (
-                                f"editar_reposicao_aberta_"
-                                f"{reposicao[0]}"
+                        if st.session_state[chave_agendar]:
+                            data_agendamento_direto = st.date_input(
+                                "Data da reposição",
+                                value=date.today(),
+                                key=(
+                                    f"data_agendamento_direto_"
+                                    f"{reposicao[0]}"
+                                )
                             )
 
-                            if chave_edicao not in st.session_state:
-                                st.session_state[chave_edicao] = False
+                            dia_semana_agendamento = (
+                                data_agendamento_direto.weekday()
+                            )
 
-                            col_editar, col_cancelar = st.columns(2)
+                            nomes_dias_agendamento = {
+                                0: "segunda-feira",
+                                1: "terça-feira",
+                                2: "quarta-feira",
+                                3: "quinta-feira",
+                                4: "sexta-feira",
+                                5: "sábado",
+                                6: "domingo"
+                            }
 
-                            with col_editar:
-                                if st.button(
-                                    "✏️ Editar",
-                                    key=(
-                                        f"abrir_edicao_reposicao_"
-                                        f"{reposicao[0]}"
+                            nome_dia_agendamento = (
+                                nomes_dias_agendamento[
+                                    dia_semana_agendamento
+                                ]
+                            )
+
+                            turmas_agendamento_direto = [
+                                turma
+                                for turma
+                                in turmas_edicao_reposicao
+                                if (
+                                    dia_semana_agendamento
+                                    in obter_dias_semana(
+                                        turma[1]
+                                    )
+                                )
+                            ]
+
+                            if len(
+                                turmas_agendamento_direto
+                            ) == 0:
+                                st.warning(
+                                    f"Não há turmas cadastradas "
+                                    f"para {nome_dia_agendamento}."
+                                )
+
+                                turma_agendamento_id = None
+
+                            else:
+                                opcoes_agendamento_direto = {
+                                    (
+                                        f"{t[2]} | "
+                                        f"{t[1]} | "
+                                        f"Instrutor: {t[3]}"
+                                    ): t[0]
+                                    for t
+                                    in turmas_agendamento_direto
+                                }
+
+                                turma_agendamento = st.selectbox(
+                                    (
+                                        "Horário disponível "
+                                        f"na {nome_dia_agendamento}"
                                     ),
-                                    use_container_width=True
-                                ):
-                                    st.session_state[
-                                        chave_edicao
-                                    ] = not st.session_state[
-                                        chave_edicao
+                                    list(
+                                        opcoes_agendamento_direto.keys()
+                                    ),
+                                    key=(
+                                        f"turma_agendamento_direto_"
+                                        f"{reposicao[0]}"
+                                    )
+                                )
+
+                                turma_agendamento_id = (
+                                    opcoes_agendamento_direto[
+                                        turma_agendamento
                                     ]
+                                )
 
-                            with col_cancelar:
-                                if st.button(
-                                    "↩️ Cancelar",
+                            observacao_agendamento = st.text_input(
+                                "Observação",
+                                value=observacao,
+                                placeholder=(
+                                    "Opcional"
+                                ),
+                                key=(
+                                    f"observacao_agendamento_direto_"
+                                    f"{reposicao[0]}"
+                                )
+                            )
+
+                            if (
+                                turma_agendamento_id is not None
+                                and st.button(
+                                    "✅ Confirmar agendamento",
                                     key=(
-                                        f"cancelar_agendamento_"
+                                        f"confirmar_agendamento_direto_"
                                         f"{reposicao[0]}"
                                     ),
                                     use_container_width=True
-                                ):
-                                    cursor.execute("""
-                                        UPDATE reposicoes
-                                        SET
-                                            data_reposicao = NULL,
-                                            turma_reposicao_id = NULL,
-                                            status = 'Pendente'
-                                        WHERE id = ?
-                                    """, (
-                                        reposicao[0],
-                                    ))
+                                )
+                            ):
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET
+                                        data_reposicao = ?,
+                                        turma_reposicao_id = ?,
+                                        observacao = ?,
+                                        status = 'Agendada'
+                                    WHERE id = ?
+                                    AND status = 'Pendente'
+                                """, (
+                                    str(
+                                        data_agendamento_direto
+                                    ),
+                                    turma_agendamento_id,
+                                    observacao_agendamento,
+                                    reposicao[0]
+                                ))
 
-                                    conn.commit()
+                                conn.commit()
 
-                                    st.session_state[
-                                        "mensagem_reposicao_editada"
-                                    ] = (
-                                        "✅ Agendamento cancelado. "
-                                        "A reposição voltou para Pendentes."
-                                    )
-
-                                    st.rerun()
-
-                            if st.session_state[chave_edicao]:
-                                try:
-                                    data_atual_edicao = (
-                                        datetime.strptime(
-                                            str(data_reposicao),
-                                            "%Y-%m-%d"
-                                        ).date()
-                                        if data_reposicao
-                                        else date.today()
-                                    )
-                                except Exception:
-                                    data_atual_edicao = date.today()
-
-                                nova_data_reposicao = st.date_input(
-                                    "Data",
-                                    value=data_atual_edicao,
-                                    key=(
-                                        f"editar_data_reposicao_"
-                                        f"{reposicao[0]}"
-                                    )
+                                st.session_state[
+                                    "mensagem_reposicao_editada"
+                                ] = (
+                                    "✅ Reposição agendada "
+                                    "com sucesso!"
                                 )
 
-                                labels_turmas = list(
-                                    opcoes_turmas_edicao_reposicao.keys()
+                                st.session_state[
+                                    chave_agendar
+                                ] = False
+
+                                st.rerun()
+
+                    # =========================
+                    # AGENDADA:
+                    # EDITAR OU CANCELAR
+                    # =========================
+                    if reposicao[6] == "Agendada":
+                        chave_edicao = (
+                            f"editar_reposicao_aberta_"
+                            f"{reposicao[0]}"
+                        )
+
+                        if chave_edicao not in st.session_state:
+                            st.session_state[chave_edicao] = False
+
+                        col_editar, col_cancelar = st.columns(2)
+
+                        with col_editar:
+                            if st.button(
+                                "✏️ Editar",
+                                key=(
+                                    f"abrir_edicao_reposicao_"
+                                    f"{reposicao[0]}"
+                                ),
+                                use_container_width=True
+                            ):
+                                st.session_state[
+                                    chave_edicao
+                                ] = not st.session_state[
+                                    chave_edicao
+                                ]
+
+                        with col_cancelar:
+                            if st.button(
+                                "↩️ Cancelar",
+                                key=(
+                                    f"cancelar_agendamento_"
+                                    f"{reposicao[0]}"
+                                ),
+                                use_container_width=True
+                            ):
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET
+                                        data_reposicao = NULL,
+                                        turma_reposicao_id = NULL,
+                                        status = 'Pendente'
+                                    WHERE id = ?
+                                """, (
+                                    reposicao[0],
+                                ))
+
+                                conn.commit()
+
+                                st.session_state[
+                                    "mensagem_reposicao_editada"
+                                ] = (
+                                    "✅ Agendamento cancelado. "
+                                    "A reposição voltou para Pendentes."
                                 )
 
-                                indice_turma_atual = 0
+                                st.rerun()
 
-                                for indice_turma, label_turma in enumerate(
-                                    labels_turmas
+                        if st.session_state[chave_edicao]:
+                            try:
+                                data_atual_edicao = (
+                                    datetime.strptime(
+                                        str(data_reposicao),
+                                        "%Y-%m-%d"
+                                    ).date()
+                                    if data_reposicao
+                                    else date.today()
+                                )
+                            except Exception:
+                                data_atual_edicao = date.today()
+
+                            nova_data_reposicao = st.date_input(
+                                "Data",
+                                value=data_atual_edicao,
+                                key=(
+                                    f"editar_data_reposicao_"
+                                    f"{reposicao[0]}"
+                                )
+                            )
+
+                            # Filtra as turmas conforme o dia
+                            # da nova data escolhida.
+                            dia_semana_edicao = (
+                                nova_data_reposicao.weekday()
+                            )
+
+                            turmas_edicao_data = [
+                                turma
+                                for turma
+                                in turmas_edicao_reposicao
+                                if (
+                                    dia_semana_edicao
+                                    in obter_dias_semana(
+                                        turma[1]
+                                    )
+                                )
+                            ]
+
+                            opcoes_turmas_edicao_data = {
+                                (
+                                    f"{t[2]} | "
+                                    f"{t[1]} | "
+                                    f"Instrutor: {t[3]}"
+                                ): t[0]
+                                for t
+                                in turmas_edicao_data
+                            }
+
+                            labels_turmas = list(
+                                opcoes_turmas_edicao_data.keys()
+                            )
+
+                            indice_turma_atual = 0
+
+                            for (
+                                indice_turma,
+                                label_turma
+                            ) in enumerate(
+                                labels_turmas
+                            ):
+                                if (
+                                    opcoes_turmas_edicao_data[
+                                        label_turma
+                                    ]
+                                    == reposicao[10]
                                 ):
-                                    if (
-                                        opcoes_turmas_edicao_reposicao[
-                                            label_turma
-                                        ]
-                                        == reposicao[10]
-                                    ):
-                                        indice_turma_atual = indice_turma
-                                        break
+                                    indice_turma_atual = (
+                                        indice_turma
+                                    )
+                                    break
 
-                                if labels_turmas:
-                                    nova_turma_reposicao = st.selectbox(
+                            if labels_turmas:
+                                nova_turma_reposicao = (
+                                    st.selectbox(
                                         "Turma / horário",
                                         labels_turmas,
                                         index=indice_turma_atual,
@@ -6205,134 +6133,144 @@ elif menu == "🔄 Reposições":
                                             f"{reposicao[0]}"
                                         )
                                     )
-
-                                    nova_turma_reposicao_id = (
-                                        opcoes_turmas_edicao_reposicao[
-                                            nova_turma_reposicao
-                                        ]
-                                    )
-                                else:
-                                    nova_turma_reposicao_id = None
-
-                                nova_observacao = st.text_input(
-                                    "Observação",
-                                    value=observacao,
-                                    key=(
-                                        f"editar_observacao_reposicao_"
-                                        f"{reposicao[0]}"
-                                    )
                                 )
 
-                                if st.button(
+                                nova_turma_reposicao_id = (
+                                    opcoes_turmas_edicao_data[
+                                        nova_turma_reposicao
+                                    ]
+                                )
+                            else:
+                                st.warning(
+                                    "Não há turmas cadastradas "
+                                    "para esta data."
+                                )
+
+                                nova_turma_reposicao_id = None
+
+                            nova_observacao = st.text_input(
+                                "Observação",
+                                value=observacao,
+                                key=(
+                                    f"editar_observacao_reposicao_"
+                                    f"{reposicao[0]}"
+                                )
+                            )
+
+                            if (
+                                nova_turma_reposicao_id
+                                is not None
+                                and st.button(
                                     "💾 Salvar",
                                     key=(
                                         f"salvar_edicao_reposicao_"
                                         f"{reposicao[0]}"
                                     ),
                                     use_container_width=True
-                                ):
-                                    cursor.execute("""
-                                        UPDATE reposicoes
-                                        SET
-                                            data_reposicao = ?,
-                                            turma_reposicao_id = ?,
-                                            observacao = ?,
-                                            status = 'Agendada'
-                                        WHERE id = ?
-                                    """, (
-                                        str(nova_data_reposicao),
-                                        nova_turma_reposicao_id,
-                                        nova_observacao,
-                                        reposicao[0]
-                                    ))
+                                )
+                            ):
+                                cursor.execute("""
+                                    UPDATE reposicoes
+                                    SET
+                                        data_reposicao = ?,
+                                        turma_reposicao_id = ?,
+                                        observacao = ?,
+                                        status = 'Agendada'
+                                    WHERE id = ?
+                                """, (
+                                    str(nova_data_reposicao),
+                                    nova_turma_reposicao_id,
+                                    nova_observacao,
+                                    reposicao[0]
+                                ))
 
-                                    conn.commit()
+                                conn.commit()
 
-                                    st.session_state[
-                                        "mensagem_reposicao_editada"
-                                    ] = (
-                                        "✅ Agendamento atualizado "
-                                        "com sucesso!"
-                                    )
+                                st.session_state[
+                                    "mensagem_reposicao_editada"
+                                ] = (
+                                    "✅ Agendamento atualizado "
+                                    "com sucesso!"
+                                )
 
-                                    st.session_state[
-                                        chave_edicao
-                                    ] = False
+                                st.session_state[
+                                    chave_edicao
+                                ] = False
 
-                                    st.rerun()
+                                st.rerun()
 
-                        if indice < quantidade:
-                            st.divider()
+                    if indice < quantidade:
+                        st.divider()
 
-            grupos_pendentes = agrupar_por_aluno(
-                reposicoes_pendentes
+        grupos_pendentes = agrupar_por_aluno(
+            reposicoes_pendentes
+        )
+
+        grupos_agendadas = agrupar_por_aluno(
+            reposicoes_agendadas
+        )
+
+        grupos_realizadas = agrupar_por_aluno(
+            reposicoes_realizadas
+        )
+
+        col_pendentes, col_agendadas, col_realizadas = (
+            st.columns(3)
+        )
+
+        with col_pendentes:
+            st.markdown(
+                f"### 🔴 Pendentes "
+                f"({len(reposicoes_pendentes)})"
             )
 
-            grupos_agendadas = agrupar_por_aluno(
-                reposicoes_agendadas
-            )
-
-            grupos_realizadas = agrupar_por_aluno(
-                reposicoes_realizadas
-            )
-
-            col_pendentes, col_agendadas, col_realizadas = (
-                st.columns(3)
-            )
-
-            with col_pendentes:
-                st.markdown(
-                    f"### 🔴 Pendentes "
-                    f"({len(reposicoes_pendentes)})"
+            if len(reposicoes_pendentes) == 0:
+                st.caption(
+                    "Nenhuma pendente."
                 )
-
-                if len(reposicoes_pendentes) == 0:
-                    st.caption(
-                        "Nenhuma pendente."
+            else:
+                for nome, lista_aluno in grupos_pendentes.items():
+                    mostrar_grupo_aluno(
+                        nome,
+                        lista_aluno,
+                        "🔴 Pendente"
                     )
-                else:
-                    for nome, lista_aluno in grupos_pendentes.items():
-                        mostrar_grupo_aluno(
-                            nome,
-                            lista_aluno,
-                            "🔴 Pendente"
-                        )
 
-            with col_agendadas:
-                st.markdown(
-                    f"### 🟠 Agendadas "
-                    f"({len(reposicoes_agendadas)})"
+        with col_agendadas:
+            st.markdown(
+                f"### 🟠 Agendadas "
+                f"({len(reposicoes_agendadas)})"
+            )
+
+            if len(reposicoes_agendadas) == 0:
+                st.caption(
+                    "Nenhuma agendada."
                 )
-
-                if len(reposicoes_agendadas) == 0:
-                    st.caption(
-                        "Nenhuma agendada."
+            else:
+                for nome, lista_aluno in grupos_agendadas.items():
+                    mostrar_grupo_aluno(
+                        nome,
+                        lista_aluno,
+                        "🟠 Agendada"
                     )
-                else:
-                    for nome, lista_aluno in grupos_agendadas.items():
-                        mostrar_grupo_aluno(
-                            nome,
-                            lista_aluno,
-                            "🟠 Agendada"
-                        )
 
-            with col_realizadas:
-                st.markdown(
-                    f"### 🟢 Realizadas "
-                    f"({len(reposicoes_realizadas)})"
+        with col_realizadas:
+            st.markdown(
+                f"### 🟢 Realizadas "
+                f"({len(reposicoes_realizadas)})"
+            )
+
+            if len(reposicoes_realizadas) == 0:
+                st.caption(
+                    "Nenhuma realizada."
                 )
-
-                if len(reposicoes_realizadas) == 0:
-                    st.caption(
-                        "Nenhuma realizada."
+            else:
+                for nome, lista_aluno in grupos_realizadas.items():
+                    mostrar_grupo_aluno(
+                        nome,
+                        lista_aluno,
+                        "🟢 Realizada"
                     )
-                else:
-                    for nome, lista_aluno in grupos_realizadas.items():
-                        mostrar_grupo_aluno(
-                            nome,
-                            lista_aluno,
-                            "🟢 Realizada"
-                        )
 
 elif menu == "👨‍🏫 Instrutores":
     st.title("Instrutores")
