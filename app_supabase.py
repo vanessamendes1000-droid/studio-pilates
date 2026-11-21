@@ -787,6 +787,20 @@ button[kind="secondary"]:has(p:first-child) {
     text-align: left;
 }
 
+
+/* Turmas por dias — visual mais arredondado */
+[data-testid="stExpander"] summary {
+    min-height: 46px !important;
+    border-radius: 14px !important;
+    padding-left: 0.85rem !important;
+}
+
+[data-testid="stExpander"] summary p {
+    font-size: 0.88rem !important;
+    font-weight: 650 !important;
+    color: #40566A !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 logo = Image.open("logo_pilates.png")
@@ -3822,7 +3836,7 @@ elif menu == "📅 Turmas":
 
                 with st.expander(
                     (
-                        f"🗓️ {dias_grupo}  •  "
+                        f"🔵 {dias_grupo}  •  "
                         f"{len(turmas_grupo)} turma(s)  •  "
                         f"{total_alunos_grupo} aluno(s)  •  "
                         f"{total_vagas_grupo} vaga(s)"
@@ -3863,7 +3877,7 @@ elif menu == "📅 Turmas":
 
                         with st.expander(
                             (
-                                f"🕐 {horario}  •  "
+                                f"⚪ {horario}  •  "
                                 f"{total_alunos}/{limite} alunos  •  "
                                 f"{status_vaga}"
                             ),
