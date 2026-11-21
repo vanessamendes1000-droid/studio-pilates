@@ -646,6 +646,147 @@ hr {
     box-shadow: 0 12px 35px rgba(44, 53, 75, 0.07);
 }
 
+
+/* =========================================================
+   BOTÕES MODERNOS — PADRÃO GLOBAL
+   ========================================================= */
+
+.stButton > button,
+.stFormSubmitButton > button,
+.stDownloadButton > button {
+    min-height: 42px !important;
+    border-radius: 12px !important;
+    padding: 0.56rem 0.88rem !important;
+    font-size: 0.87rem !important;
+    font-weight: 650 !important;
+    background: #FFFFFF !important;
+    color: #2F4C63 !important;
+    border: 1px solid #D9E4EB !important;
+    box-shadow: 0 3px 10px rgba(18, 59, 91, 0.05) !important;
+    transition: all 0.16s ease !important;
+}
+
+.stButton > button:hover,
+.stFormSubmitButton > button:hover,
+.stDownloadButton > button:hover {
+    background: #F4FBFD !important;
+    color: #0F5F88 !important;
+    border-color: #75CFE2 !important;
+    box-shadow: 0 6px 16px rgba(18, 59, 91, 0.09) !important;
+    transform: translateY(-1px);
+}
+
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #174E73 0%, #277DA7 100%) !important;
+    color: #FFFFFF !important;
+    border-color: transparent !important;
+    box-shadow: 0 7px 18px rgba(23, 78, 115, 0.18) !important;
+}
+
+.stButton > button:disabled,
+.stFormSubmitButton > button:disabled,
+.stDownloadButton > button:disabled {
+    opacity: 0.48 !important;
+    transform: none !important;
+}
+
+/* =========================================================
+   ABAS COM APARÊNCIA DE BOTÕES
+   ========================================================= */
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.55rem !important;
+    border-bottom: none !important;
+    flex-wrap: wrap !important;
+    margin-bottom: 1rem !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 42px !important;
+    padding: 0.55rem 0.85rem !important;
+    background: #FFFFFF !important;
+    border: 1px solid #DCE5EB !important;
+    border-radius: 12px !important;
+    color: #496174 !important;
+    font-size: 0.86rem !important;
+    font-weight: 650 !important;
+    box-shadow: 0 3px 9px rgba(18, 59, 91, 0.04) !important;
+    transition: all 0.16s ease !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    background: #F4FBFD !important;
+    border-color: #83D3E4 !important;
+    color: #0F5F88 !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #174E73 0%, #277DA7 100%) !important;
+    border-color: transparent !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 7px 18px rgba(23, 78, 115, 0.16) !important;
+}
+
+.stTabs [aria-selected="true"] p,
+.stTabs [aria-selected="true"] span {
+    color: #FFFFFF !important;
+}
+
+.stTabs [data-baseweb="tab-highlight"] {
+    display: none !important;
+}
+
+/* =========================================================
+   BOTÕES EM CARDS E EXPANDERS
+   ========================================================= */
+
+[data-testid="stExpander"] .stButton > button,
+[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
+    min-height: 40px !important;
+    font-size: 0.83rem !important;
+}
+
+/* =========================================================
+   RADIO COM APARÊNCIA DE BOTÃO
+   ========================================================= */
+
+[role="radiogroup"] {
+    gap: 0.45rem !important;
+    flex-wrap: wrap !important;
+}
+
+[role="radiogroup"] label {
+    background: #FFFFFF !important;
+    border: 1px solid #DCE5EB !important;
+    border-radius: 11px !important;
+    padding: 0.5rem 0.72rem !important;
+    font-size: 0.85rem !important;
+    box-shadow: 0 2px 7px rgba(18, 59, 91, 0.035);
+}
+
+[role="radiogroup"] label:has(input:checked) {
+    background: #EAF6FA !important;
+    border-color: #64C6DB !important;
+    color: #0F5F88 !important;
+}
+
+@media (max-width: 700px) {
+    .stButton > button,
+    .stFormSubmitButton > button,
+    .stDownloadButton > button,
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.81rem !important;
+        min-height: 40px !important;
+    }
+}
+
+
+/* Nomes clicáveis / atalhos para histórico */
+button[kind="secondary"]:has(p:first-child) {
+    text-align: left;
+}
+
 </style>
 """, unsafe_allow_html=True)
 logo = Image.open("logo_pilates.png")
@@ -811,6 +952,19 @@ for opcao in opcoes_menu:
 st.sidebar.divider()
 
 menu = st.session_state.menu_ativo
+
+# =========================
+# ATALHO GLOBAL PARA O HISTÓRICO DO ALUNO
+# =========================
+def abrir_historico_aluno(aluno_id):
+    st.session_state[
+        "historico_aluno_direto_id"
+    ] = int(aluno_id)
+
+    st.session_state.menu_ativo = "👥 Alunos"
+
+    st.rerun()
+
 
 if menu == "🔄 Reposições":
     st.session_state.menu_ativo = "✅ Presenças"
@@ -1681,13 +1835,24 @@ elif menu == "👥 Alunos":
     )
 
     st.divider()
+    historico_direto_id = st.session_state.get(
+        "historico_aluno_direto_id"
+    )
+
+    aba_padrao_alunos = (
+        "📚 Histórico do aluno"
+        if historico_direto_id
+        else "➕ Cadastrar"
+    )
+
     aba_cadastro, aba_lista, aba_edicao, aba_historico_aluno = st.tabs(
         [
             "➕ Cadastrar",
             "👥 Alunos cadastrados",
             "✏️ Editar / Excluir",
             "📚 Histórico do aluno"
-        ]
+        ],
+        default=aba_padrao_alunos
     )
 
     # =========================
@@ -1730,38 +1895,74 @@ elif menu == "👥 Alunos":
                 for t in turmas_cadastradas
             }
 
+            st.markdown(
+                """
+                <style>
+                /* Cadastro de aluno mais compacto */
+                div[data-testid="stForm"] label p {
+                    font-size: 0.82rem !important;
+                    font-weight: 600 !important;
+                }
+
+                div[data-testid="stForm"] input {
+                    min-height: 40px !important;
+                    font-size: 0.90rem !important;
+                }
+
+                div[data-testid="stForm"] [data-baseweb="select"] > div {
+                    min-height: 40px !important;
+                    font-size: 0.90rem !important;
+                }
+
+                div[data-testid="stForm"] [data-testid="stVerticalBlock"] {
+                    gap: 0.55rem !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+
             with st.form(
                 "form_cadastro_aluno",
                 clear_on_submit=True
             ):
-                nome = st.text_input(
-                    "Nome do aluno"
+                st.caption(
+                    "Preencha os dados abaixo. Os campos foram "
+                    "organizados lado a lado para facilitar a visualização."
                 )
 
-                telefone = st.text_input(
-                    "Telefone"
-                )
+                col_cad_1, col_cad_2 = st.columns(2)
 
-                cpf = st.text_input(
-                    "CPF"
-                )
+                with col_cad_1:
+                    nome = st.text_input(
+                        "Nome do aluno"
+                    )
 
-                endereco = st.text_input(
-                    "Endereço"
-                )
+                    cpf = st.text_input(
+                        "CPF"
+                    )
 
-                data_nascimento = st.text_input(
-                    "Data de nascimento",
-                    placeholder="DD/MM/AAAA"
-                )
+                    data_nascimento = st.text_input(
+                        "Data de nascimento",
+                        placeholder="DD/MM/AAAA"
+                    )
 
-                tabela_preco = st.selectbox(
-                    "Tabela de preço",
-                    [
-                        "Antigo",
-                        "Novo"
-                    ]
-                )
+                with col_cad_2:
+                    telefone = st.text_input(
+                        "Telefone"
+                    )
+
+                    endereco = st.text_input(
+                        "Endereço"
+                    )
+
+                    tabela_preco = st.selectbox(
+                        "Tabela de preço",
+                        [
+                            "Antigo",
+                            "Novo"
+                        ]
+                    )
 
                 turma = st.selectbox(
                     "Turma",
@@ -1769,7 +1970,8 @@ elif menu == "👥 Alunos":
                 )
 
                 cadastrar = st.form_submit_button(
-                    "Cadastrar aluno"
+                    "✅ Cadastrar aluno",
+                    use_container_width=True
                 )
 
                 if cadastrar:
@@ -1926,7 +2128,16 @@ elif menu == "👥 Alunos":
                 )
 
                 colunas[0].write(aluno[0])
-                colunas[1].write(aluno[1])
+
+                if colunas[1].button(
+                    f"👤 {aluno[1]}",
+                    key=f"historico_lista_aluno_{aluno[0]}",
+                    use_container_width=True
+                ):
+                    abrir_historico_aluno(
+                        aluno[0]
+                    )
+
                 colunas[2].write(aluno[2])
                 colunas[3].write(aluno[3])
                 colunas[4].write(aluno[4])
@@ -2003,36 +2214,40 @@ elif menu == "👥 Alunos":
 
                 dados_aluno = cursor.fetchone()
 
-                novo_nome = st.text_input(
-                    "Nome",
-                    value=dados_aluno[0] or "",
-                    key=f"editar_nome_{aluno_id_edicao}"
-                )
+                col_edit_1, col_edit_2 = st.columns(2)
 
-                novo_telefone = st.text_input(
-                    "Telefone",
-                    value=dados_aluno[1] or "",
-                    key=f"editar_telefone_{aluno_id_edicao}"
-                )
+                with col_edit_1:
+                    novo_nome = st.text_input(
+                        "Nome",
+                        value=dados_aluno[0] or "",
+                        key=f"editar_nome_{aluno_id_edicao}"
+                    )
 
-                novo_cpf = st.text_input(
-                    "CPF",
-                    value=dados_aluno[2] or "",
-                    key=f"editar_cpf_{aluno_id_edicao}"
-                )
+                    novo_cpf = st.text_input(
+                        "CPF",
+                        value=dados_aluno[2] or "",
+                        key=f"editar_cpf_{aluno_id_edicao}"
+                    )
 
-                novo_endereco = st.text_input(
-                    "Endereço",
-                    value=dados_aluno[3] or "",
-                    key=f"editar_endereco_{aluno_id_edicao}"
-                )
+                    nova_data_nascimento = st.text_input(
+                        "Data de nascimento",
+                        value=dados_aluno[4] or "",
+                        placeholder="DD/MM/AAAA",
+                        key=f"editar_nascimento_{aluno_id_edicao}"
+                    )
 
-                nova_data_nascimento = st.text_input(
-                    "Data de nascimento",
-                    value=dados_aluno[4] or "",
-                    placeholder="DD/MM/AAAA",
-                    key=f"editar_nascimento_{aluno_id_edicao}"
-                )
+                with col_edit_2:
+                    novo_telefone = st.text_input(
+                        "Telefone",
+                        value=dados_aluno[1] or "",
+                        key=f"editar_telefone_{aluno_id_edicao}"
+                    )
+
+                    novo_endereco = st.text_input(
+                        "Endereço",
+                        value=dados_aluno[3] or "",
+                        key=f"editar_endereco_{aluno_id_edicao}"
+                    )
 
                 opcoes_tabela = [
                     "Antigo",
@@ -2311,21 +2526,47 @@ elif menu == "👥 Alunos":
                 for aluno in alunos_historico
             }
 
-            lista_historico = (
-                [""]
-                + list(opcoes_historico.keys())
+            lista_historico = list(
+                opcoes_historico.keys()
             )
+
+            historico_direto_id = st.session_state.get(
+                "historico_aluno_direto_id"
+            )
+
+            indice_historico = None
+
+            if historico_direto_id:
+                for indice_opcao, opcao_hist in enumerate(
+                    lista_historico
+                ):
+                    if (
+                        opcoes_historico.get(
+                            opcao_hist
+                        ) == historico_direto_id
+                    ):
+                        indice_historico = indice_opcao
+                        break
 
             aluno_historico_selecionado = st.selectbox(
-                "Selecione o aluno",
+                "Selecione ou pesquise o aluno",
                 lista_historico,
-                index=0,
-                key="aluno_historico_financeiro"
+                index=indice_historico,
+                placeholder="Digite ou selecione um aluno"
             )
 
-            if aluno_historico_selecionado == "":
+            # O ID direto serve apenas para abrir o histórico
+            # quando o usuário clica no nome em outra tela.
+            # Depois disso, o seletor volta ao comportamento normal.
+            if historico_direto_id:
+                st.session_state.pop(
+                    "historico_aluno_direto_id",
+                    None
+                )
+
+            if aluno_historico_selecionado is None:
                 st.info(
-                    "Selecione um aluno para consultar o histórico."
+                    "Digite ou selecione um aluno para consultar o histórico."
                 )
 
             else:
@@ -3097,12 +3338,12 @@ elif menu == "👥 Alunos":
 elif menu == "📅 Turmas":
     st.title("Turmas")
 
-    aba_cadastro, aba_lista, aba_edicao, aba_alunos_turma = st.tabs(
+    aba_alunos_turma, aba_cadastro, aba_lista, aba_edicao = st.tabs(
     [
+        "👥 Alunos da turma",
         "➕ Cadastrar",
         "📋 Turmas cadastradas",
-        "✏️ Editar / Excluir",
-        "👥 Alunos da turma"
+        "✏️ Editar / Excluir"
     ]
 )
 
@@ -3470,19 +3711,41 @@ elif menu == "📅 Turmas":
                     )
     # =========================
     # ABA 4 - ALUNOS DA TURMA
+    # ORGANIZADO POR DIAS
     # =========================
     with aba_alunos_turma:
-        st.subheader("Alunos da turma")
+        st.subheader("Alunos por turma")
+
+        st.caption(
+            "Abra o grupo de dias e depois o horário "
+            "para visualizar os alunos matriculados."
+        )
 
         cursor.execute("""
             SELECT
-                id,
-                dias,
-                horario,
-                instrutor,
-                limite_alunos
-            FROM turmas
-            ORDER BY dias, horario
+                t.id,
+                t.dias,
+                t.horario,
+                t.instrutor,
+                t.limite_alunos,
+                COUNT(a.id) AS total_alunos
+            FROM turmas t
+            LEFT JOIN alunos a
+                ON a.turma_id = t.id
+            GROUP BY
+                t.id,
+                t.dias,
+                t.horario,
+                t.instrutor,
+                t.limite_alunos
+            ORDER BY
+                CASE
+                    WHEN t.dias = 'Segunda e Quinta' THEN 1
+                    WHEN t.dias = 'Terça e Sexta' THEN 2
+                    WHEN t.dias = 'Quarta e Sábado' THEN 3
+                    ELSE 4
+                END,
+                t.horario
         """)
 
         turmas_consulta = cursor.fetchall()
@@ -3493,139 +3756,211 @@ elif menu == "📅 Turmas":
             )
 
         else:
-            opcoes_consulta_turma = {
-                f"{t[1]} - {t[2]}": t
-                for t in turmas_consulta
-            }
+            grupos_turmas = {}
 
-            lista_consulta_turmas = (
-                [""]
-                + list(opcoes_consulta_turma.keys())
-            )
-
-            turma_consulta = st.selectbox(
-                "Selecione a turma",
-                lista_consulta_turmas,
-                index=0,
-                key="consultar_alunos_turma"
-            )
-
-            if turma_consulta == "":
-                st.info(
-                    "Selecione uma turma para visualizar os alunos."
+            for turma in turmas_consulta:
+                dias_grupo = (
+                    turma[1]
+                    or "Outros dias"
                 )
 
-            else:
-                dados_turma_consulta = (
-                    opcoes_consulta_turma[
-                        turma_consulta
-                    ]
-                )
+                if dias_grupo not in grupos_turmas:
+                    grupos_turmas[
+                        dias_grupo
+                    ] = []
 
-                turma_id_consulta = (
-                    dados_turma_consulta[0]
-                )
+                grupos_turmas[
+                    dias_grupo
+                ].append(turma)
 
-                instrutor_consulta = (
-                    dados_turma_consulta[3]
-                    or "Não informado"
-                )
+            ordem_grupos = [
+                "Segunda e Quinta",
+                "Terça e Sexta",
+                "Quarta e Sábado"
+            ]
 
-                limite_consulta = int(
-                    dados_turma_consulta[4] or 4
-                )
+            grupos_ordenados = []
 
-                cursor.execute("""
-                    SELECT
-                        id,
-                        nome,
-                        telefone,
-                        tabela_preco
-                    FROM alunos
-                    WHERE turma_id = ?
-                    ORDER BY nome
-                """, (
-                    turma_id_consulta,
-                ))
-
-                alunos_da_turma = cursor.fetchall()
-
-                quantidade_alunos = len(
-                    alunos_da_turma
-                )
-
-                vagas_disponiveis = (
-                    limite_consulta
-                    - quantidade_alunos
-                )
-
-                if vagas_disponiveis < 0:
-                    vagas_disponiveis = 0
-
-                st.write(
-                    f"**Turma:** {turma_consulta}"
-                )
-
-                st.write(
-                    f"**Instrutor:** "
-                    f"{instrutor_consulta}"
-                )
-
-                col1, col2, col3 = st.columns(3)
-
-                col1.metric(
-                    "Alunos",
-                    quantidade_alunos
-                )
-
-                col2.metric(
-                    "Limite",
-                    limite_consulta
-                )
-
-                col3.metric(
-                    "Vagas",
-                    vagas_disponiveis
-                )
-
-                st.divider()
-
-                if quantidade_alunos == 0:
-                    st.info(
-                        "Nenhum aluno cadastrado nesta turma."
+            for grupo in ordem_grupos:
+                if grupo in grupos_turmas:
+                    grupos_ordenados.append(
+                        (
+                            grupo,
+                            grupos_turmas[grupo]
+                        )
                     )
 
-                else:
-                    st.subheader(
-                        "👥 Alunos matriculados"
+            for grupo, lista_grupo in (
+                grupos_turmas.items()
+            ):
+                if grupo not in ordem_grupos:
+                    grupos_ordenados.append(
+                        (
+                            grupo,
+                            lista_grupo
+                        )
                     )
 
-                    for numero, aluno in enumerate(
-                        alunos_da_turma,
-                        start=1
-                    ):
-                        nome_aluno = aluno[1]
-                        telefone_aluno = (
-                            aluno[2]
+            for (
+                dias_grupo,
+                turmas_grupo
+            ) in grupos_ordenados:
+
+                total_alunos_grupo = sum(
+                    int(t[5] or 0)
+                    for t in turmas_grupo
+                )
+
+                total_vagas_grupo = sum(
+                    max(
+                        int(t[4] or 4)
+                        - int(t[5] or 0),
+                        0
+                    )
+                    for t in turmas_grupo
+                )
+
+                with st.expander(
+                    (
+                        f"🗓️ {dias_grupo}  •  "
+                        f"{len(turmas_grupo)} turma(s)  •  "
+                        f"{total_alunos_grupo} aluno(s)  •  "
+                        f"{total_vagas_grupo} vaga(s)"
+                    ),
+                    expanded=False
+                ):
+
+                    for turma in turmas_grupo:
+                        turma_id = turma[0]
+                        horario = (
+                            turma[2]
+                            or "Sem horário"
+                        )
+                        instrutor = (
+                            turma[3]
                             or "Não informado"
                         )
-                        tabela_aluno = (
-                            aluno[3]
-                            or "Não informada"
+                        limite = int(
+                            turma[4] or 4
+                        )
+                        total_alunos = int(
+                            turma[5] or 0
+                        )
+                        vagas = max(
+                            limite
+                            - total_alunos,
+                            0
                         )
 
-                        st.write(
-                            f"**{numero}. "
-                            f"{nome_aluno}**"
-                        )
+                        if vagas == 0:
+                            status_vaga = "🔴 Lotada"
+                        elif vagas == 1:
+                            status_vaga = "🟡 1 vaga"
+                        else:
+                            status_vaga = (
+                                f"🟢 {vagas} vagas"
+                            )
 
-                        st.caption(
-                            f"Telefone: "
-                            f"{telefone_aluno} | "
-                            f"Tabela: {tabela_aluno}"
-                        )
+                        with st.expander(
+                            (
+                                f"🕐 {horario}  •  "
+                                f"{total_alunos}/{limite} alunos  •  "
+                                f"{status_vaga}"
+                            ),
+                            expanded=False
+                        ):
 
-                        st.divider()
+                            col_info_1, col_info_2, col_info_3 = (
+                                st.columns(3)
+                            )
+
+                            col_info_1.metric(
+                                "👥 Alunos",
+                                total_alunos
+                            )
+
+                            col_info_2.metric(
+                                "🪑 Vagas",
+                                vagas
+                            )
+
+                            col_info_3.metric(
+                                "🎓 Instrutor",
+                                instrutor
+                            )
+
+                            cursor.execute("""
+                                SELECT
+                                    id,
+                                    nome,
+                                    telefone,
+                                    tabela_preco
+                                FROM alunos
+                                WHERE turma_id = ?
+                                ORDER BY nome
+                            """, (
+                                turma_id,
+                            ))
+
+                            alunos_da_turma = (
+                                cursor.fetchall()
+                            )
+
+                            st.markdown(
+                                "#### 👥 Alunos matriculados"
+                            )
+
+                            if len(
+                                alunos_da_turma
+                            ) == 0:
+                                st.caption(
+                                    "Nenhum aluno cadastrado "
+                                    "nesta turma."
+                                )
+
+                            else:
+                                for (
+                                    numero,
+                                    aluno
+                                ) in enumerate(
+                                    alunos_da_turma,
+                                    start=1
+                                ):
+                                    nome_aluno = (
+                                        aluno[1]
+                                    )
+
+                                    telefone_aluno = (
+                                        aluno[2]
+                                        or "Não informado"
+                                    )
+
+                                    tabela_aluno = (
+                                        aluno[3]
+                                        or "Não informada"
+                                    )
+
+                                    with st.container(
+                                        border=True
+                                    ):
+                                        if st.button(
+                                            f"👤 {numero}. {nome_aluno}",
+                                            key=(
+                                                f"historico_turma_aluno_"
+                                                f"{aluno[0]}_{turma_id}"
+                                            ),
+                                            use_container_width=True
+                                        ):
+                                            abrir_historico_aluno(
+                                                aluno[0]
+                                            )
+
+                                        st.caption(
+                                            f"📱 {telefone_aluno}  •  "
+                                            f"💳 Tabela: "
+                                            f"{tabela_aluno}"
+                                        )
+
 elif menu == "✅ Presenças":
     st.title("Presenças")
 
@@ -4160,7 +4495,7 @@ elif menu == "✅ Presenças":
 
                                     for detalhe in detalhes_chamada:
                                         instrutor_registro = (
-                                            detalhe[2]
+                                            detalhe[3]
                                             or "Não informado"
                                         )
 
@@ -4184,12 +4519,30 @@ elif menu == "✅ Presenças":
                                     )
 
                                     for detalhe in detalhes_chamada:
-                                        nome_aluno = detalhe[0]
-                                        status_aluno = detalhe[1]
+                                        aluno_id_detalhe = detalhe[0]
+                                        nome_aluno = detalhe[1]
+                                        status_aluno = detalhe[2]
 
-                                        st.write(
-                                            f"• {nome_aluno} — "
-                                            f"{status_aluno}"
+                                        col_nome_det, col_status_det = (
+                                            st.columns([2, 1])
+                                        )
+
+                                        if col_nome_det.button(
+                                            f"👤 {nome_aluno}",
+                                            key=(
+                                                f"historico_chamada_"
+                                                f"{aluno_id_detalhe}_"
+                                                f"{turma_id_finalizada}_"
+                                                f"{data_aula}"
+                                            ),
+                                            use_container_width=True
+                                        ):
+                                            abrir_historico_aluno(
+                                                aluno_id_detalhe
+                                            )
+
+                                        col_status_det.write(
+                                            status_aluno
                                         )
 
             turma_id_presenca = st.session_state.get(
@@ -4324,8 +4677,21 @@ elif menu == "✅ Presenças":
                             aluno_id = aluno[0]
                             aluno_nome = aluno[1]
 
+                            if st.button(
+                                f"👤 {aluno_nome}",
+                                key=(
+                                    f"historico_chamada_aberta_"
+                                    f"{aluno_id}_"
+                                    f"{turma_id_presenca}"
+                                ),
+                                use_container_width=True
+                            ):
+                                abrir_historico_aluno(
+                                    aluno_id
+                                )
+
                             status = st.radio(
-                                aluno_nome,
+                                "Status",
                                 [
                                     "Presente",
                                     "Falta",
@@ -4381,8 +4747,20 @@ elif menu == "✅ Presenças":
                                 aluno_nome = reposicao[1]
                                 reposicao_id = reposicao[2]
 
+                                if st.button(
+                                    f"👤 {aluno_nome}",
+                                    key=(
+                                        f"historico_reposicao_chamada_"
+                                        f"{aluno_id}_{reposicao_id}"
+                                    ),
+                                    use_container_width=True
+                                ):
+                                    abrir_historico_aluno(
+                                        aluno_id
+                                    )
+
                                 status = st.radio(
-                                    f"🔄 {aluno_nome}",
+                                    "Status da reposição",
                                     [
                                         "Reposição",
                                         "Não compareceu"
@@ -5938,6 +6316,7 @@ elif menu == "💰 Financeiro":
         if diferenca_fin_quadro < 0:
             alunos_atrasados_quadro.append(
                 (
+                    registro_fin_quadro[0],
                     nome_fin_quadro,
                     data_renovacao_fin_quadro
                 )
@@ -5946,6 +6325,7 @@ elif menu == "💰 Financeiro":
         elif 0 <= diferenca_fin_quadro <= 7:
             alunos_a_vencer_quadro.append(
                 (
+                    registro_fin_quadro[0],
                     nome_fin_quadro,
                     data_renovacao_fin_quadro
                 )
@@ -5988,15 +6368,34 @@ elif menu == "💰 Financeiro":
                     )
                 else:
                     alunos_a_vencer_quadro.sort(
-                        key=lambda item: item[1]
+                        key=lambda item: item[2]
                     )
 
-                    for nome_vencer, data_vencer in (
-                        alunos_a_vencer_quadro
-                    ):
-                        st.write(
-                            f"**{nome_vencer}** — "
-                            f"{data_vencer.strftime('%d/%m/%Y')}"
+                    for (
+                        aluno_id_vencer,
+                        nome_vencer,
+                        data_vencer
+                    ) in alunos_a_vencer_quadro:
+                        col_nome_vencer, col_data_vencer = (
+                            st.columns([2, 1])
+                        )
+
+                        if col_nome_vencer.button(
+                            f"👤 {nome_vencer}",
+                            key=(
+                                f"historico_fin_vencer_"
+                                f"{aluno_id_vencer}"
+                            ),
+                            use_container_width=True
+                        ):
+                            abrir_historico_aluno(
+                                aluno_id_vencer
+                            )
+
+                        col_data_vencer.write(
+                            data_vencer.strftime(
+                                "%d/%m/%Y"
+                            )
                         )
 
         with col_lista_2:
@@ -6010,16 +6409,35 @@ elif menu == "💰 Financeiro":
                     )
                 else:
                     alunos_atrasados_quadro.sort(
-                        key=lambda item: item[1],
+                        key=lambda item: item[2],
                         reverse=True
                     )
 
-                    for nome_atrasado, data_atrasada in (
-                        alunos_atrasados_quadro
-                    ):
-                        st.write(
-                            f"**{nome_atrasado}** — "
-                            f"{data_atrasada.strftime('%d/%m/%Y')}"
+                    for (
+                        aluno_id_atrasado,
+                        nome_atrasado,
+                        data_atrasada
+                    ) in alunos_atrasados_quadro:
+                        col_nome_atrasado, col_data_atrasada = (
+                            st.columns([2, 1])
+                        )
+
+                        if col_nome_atrasado.button(
+                            f"👤 {nome_atrasado}",
+                            key=(
+                                f"historico_fin_atrasado_"
+                                f"{aluno_id_atrasado}"
+                            ),
+                            use_container_width=True
+                        ):
+                            abrir_historico_aluno(
+                                aluno_id_atrasado
+                            )
+
+                        col_data_atrasada.write(
+                            data_atrasada.strftime(
+                                "%d/%m/%Y"
+                            )
                         )
 
     st.divider()
