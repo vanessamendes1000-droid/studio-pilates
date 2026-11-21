@@ -153,297 +153,497 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("Acesso ao sistema")
 
-    usuario_digitado = st.text_input("Usuário")
-    senha_digitada = st.text_input("Senha", type="password")
+    st.markdown(
+        """
+        <style>
+        /* Oculta a lateral somente na tela de login */
+        [data-testid="stSidebar"] {
+            display: none;
+        }
 
-    if st.button("Entrar"):
-        if (
-            usuario_digitado == st.secrets["auth"]["usuario"]
-            and senha_digitada == st.secrets["auth"]["senha"]
+        [data-testid="collapsedControl"] {
+            display: none;
+        }
+
+        .block-container {
+            max-width: 1280px;
+            padding-top: 1.2rem;
+            padding-bottom: 1.2rem;
+        }
+
+        .stApp {
+            background:
+                linear-gradient(135deg, #F8FBFD 0%, #F2F7FA 100%);
+        }
+
+        .login-titulo {
+            text-align: center;
+            color: #123B5B;
+            font-size: 2rem;
+            font-weight: 800;
+            margin-top: 0.3rem;
+            margin-bottom: 0.2rem;
+        }
+
+        .login-subtitulo {
+            text-align: center;
+            color: #7A8795;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .login-card {
+            background: #FFFFFF;
+            border: 1px solid #E8EEF3;
+            border-radius: 24px;
+            padding: 1.4rem 1.6rem 1.8rem 1.6rem;
+            box-shadow: 0 18px 50px rgba(23, 65, 96, 0.08);
+        }
+
+        .login-card [data-baseweb="input"] > div {
+            border-radius: 12px !important;
+            min-height: 48px;
+            border: 1px solid #D9E3EA !important;
+            background: #FFFFFF !important;
+        }
+
+        .login-card [data-baseweb="input"] > div:focus-within {
+            border-color: #2D8EB9 !important;
+            box-shadow: 0 0 0 3px rgba(45, 142, 185, 0.10) !important;
+        }
+
+        .login-card .stButton > button {
+            width: 100%;
+            min-height: 48px;
+            border: none !important;
+            border-radius: 12px !important;
+            background:
+                linear-gradient(135deg, #123B5B 0%, #146C97 100%) !important;
+            color: #FFFFFF !important;
+            font-weight: 750 !important;
+            font-size: 1rem !important;
+            box-shadow: 0 8px 20px rgba(18, 59, 91, 0.18);
+        }
+
+        .login-card .stButton > button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(18, 59, 91, 0.23);
+        }
+
+        .login-foto img {
+            border-radius: 26px !important;
+            min-height: 620px;
+            object-fit: cover;
+            box-shadow: 0 20px 55px rgba(25, 52, 75, 0.12);
+        }
+
+        @media (max-width: 900px) {
+            .login-foto {
+                display: none;
+            }
+
+            .block-container {
+                max-width: 560px;
+                padding-top: 1rem;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Carrega a logo diretamente da pasta do programa
+    caminho_logo_login = Path(
+        "logo_pilates.png"
+    )
+
+    logo_login_disponivel = (
+        caminho_logo_login.exists()
+    )
+
+    col_login, col_foto = st.columns(
+        [0.92, 1.08],
+        gap="large"
+    )
+
+    with col_login:
+        st.markdown(
+            '<div class="login-card">',
+            unsafe_allow_html=True
+        )
+
+        if logo_login_disponivel:
+            col_logo_1, col_logo_2, col_logo_3 = st.columns(
+                [1, 1.25, 1]
+            )
+
+            with col_logo_2:
+                st.image(
+                    str(caminho_logo_login),
+                    use_container_width=True
+                )
+
+        st.markdown(
+            '<div class="login-titulo">'
+            'Acesse o sistema'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        st.markdown(
+            '<div class="login-subtitulo">'
+            'Digite seu usuário e senha para continuar'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        usuario_digitado = st.text_input(
+            "Usuário",
+            placeholder="Digite seu usuário",
+            key="login_usuario"
+        )
+
+        senha_digitada = st.text_input(
+            "Senha",
+            type="password",
+            placeholder="Digite sua senha",
+            key="login_senha"
+        )
+
+        if st.button(
+            "Entrar",
+            use_container_width=True,
+            key="botao_entrar"
         ):
-            st.session_state.logado = True
-            st.rerun()
+            if (
+                usuario_digitado
+                == st.secrets["auth"]["usuario"]
+                and senha_digitada
+                == st.secrets["auth"]["senha"]
+            ):
+                st.session_state.logado = True
+                st.rerun()
+            else:
+                st.error(
+                    "Usuário ou senha incorretos."
+                )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True
+        )
+
+    with col_foto:
+        st.markdown(
+            '<div class="login-foto">',
+            unsafe_allow_html=True
+        )
+
+        caminho_foto_login = Path(
+            "pilates_login_side.png"
+        )
+
+        if caminho_foto_login.exists():
+            st.image(
+                str(caminho_foto_login),
+                use_container_width=True
+            )
         else:
-            st.error("Usuário ou senha incorretos.")
+            st.info(
+                "Adicione o arquivo "
+                "'pilates_login_side.png' "
+                "na pasta do programa."
+            )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True
+        )
 
     st.stop()
 st.markdown("""
 <style>
 
-/* =========================
-   MENU LATERAL
-   ========================= */
-[data-testid="stSidebar"] {
-    background: linear-gradient(
-        180deg,
-        #163A5F 0%,
-        #1C4A70 55%,
-        #245B87 100%
-    );
-}
-/* =========================
-   MENU LATERAL
-   ========================= */
+/* =========================================================
+   VISUAL GERAL — DASHBOARD MODERNO
+   ========================================================= */
 
-[data-testid="stSidebar"] {
-    background: linear-gradient(
-        180deg,
-        #163A5F 0%,
-        #1C4A70 55%,
-        #245B87 100%
-    );
+.stApp {
+    background: #F7F8FC;
+    color: #25324A;
 }
 
-/* Textos do menu */
-[data-testid="stSidebar"] * {
-    color: white;
+.block-container {
+    max-width: 1220px;
+    padding-top: 1.8rem;
+    padding-bottom: 3rem;
 }
 
-/* Espaço interno */
-[data-testid="stSidebar"] .block-container {
-    padding-top: 22px;
-    padding-left: 15px;
-    padding-right: 15px;
+/* Cabeçalhos */
+h1, h2, h3 {
+    color: #252A3A !important;
+    letter-spacing: -0.025em;
+    font-weight: 750 !important;
 }
-
-/* Espaço entre opções */
-[data-testid="stSidebar"] [role="radiogroup"] {
-    gap: 5px;
-}
-
-/* Cada opção do menu */
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    min-height: 46px;
-    display: flex;
-    align-items: center;
-    font-size: 16px !important;
-    font-weight: 500 !important;
-    padding: 10px 14px !important;
-    margin-bottom: 3px !important;
-    border-radius: 12px !important;
-    transition: 0.2s ease;
-}
-
-/* Texto das opções */
-[data-testid="stSidebar"] [role="radiogroup"] label p {
-    color: rgba(255,255,255,0.88) !important;
-    font-size: 16px !important;
-}
-
-/* Passar o mouse */
-[data-testid="stSidebar"] [role="radiogroup"] label:hover {
-    background: rgba(255,255,255,0.10);
-}
-
-/* Item selecionado */
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-    background: rgba(255,255,255,0.18);
-    border-left: 4px solid #56D6E0;
-}
-
-/* Texto selecionado */
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p {
-    color: white !important;
-    font-weight: 700 !important;
-}
-
-/* Tenta remover a bolinha do radio */
-[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
-    display: none !important;
-}
-
-/* Remove espaço da bolinha */
-[data-testid="stSidebar"] div[role="radiogroup"] label {
-    gap: 0 !important;
-}
-/* ESCONDE O INDICADOR VISUAL DO RADIO */
-[data-testid="stSidebar"] [role="radiogroup"] label div[data-baseweb="radio"] {
-    display: none !important;
-}
-
-/* REMOVE QUALQUER ESPAÇO RESERVADO PARA O RADIO */
-[data-testid="stSidebar"] [role="radiogroup"] label > div {
-    margin-left: 0 !important;
-}
-
-/* ALINHA O TEXTO À ESQUERDA */
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    padding-left: 16px !important;
-    gap: 0 !important;
-}
-/* BOTÕES DO MENU LATERAL */
-[data-testid="stSidebar"] .stButton > button {
-    width: 100%;
-    min-height: 46px;
-    background: transparent;
-    color: white;
-    border: none;
-    border-radius: 12px;
-    text-align: left;
-    justify-content: flex-start;
-    padding: 10px 16px;
-    font-size: 16px;
-    font-weight: 500;
-    box-shadow: none;
-}
-
-/* Hover dos botões do menu */
-[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255,255,255,0.12);
-    color: white;
-    border: none;
-}
-
-/* Remove borda ao clicar */
-[data-testid="stSidebar"] .stButton > button:focus {
-    color: white;
-    border: none;
-    box-shadow: none;
-}
-
-/* =========================
-   TÍTULOS
-   ========================= */
 
 h1 {
-    color: #163A5F;
-    font-weight: 700;
+    font-size: 2.15rem !important;
+    margin-bottom: 0.25rem !important;
 }
 
-h2, h3 {
-    color: #245B87;
+h2 {
+    font-size: 1.5rem !important;
 }
 
-/* =========================
-   BOTÕES GERAIS
-   ========================= */
-
-.stButton > button {
-    background-color: #2E6F9E;
-    color: white;
-    border: none;
-    border-radius: 12px;
-    padding: 9px 18px;
-    font-weight: 600;
+h3 {
+    font-size: 1.08rem !important;
 }
 
-.stButton > button:hover {
-    background-color: #163A5F;
-    color: white;
+p, label, .stMarkdown {
+    color: #5E677A;
 }
 
-/* =========================
-   BOTÕES DO MENU LATERAL
-   ========================= */
+/* =========================================================
+   MENU LATERAL — AZUL
+   ========================================================= */
+
+[data-testid="stSidebar"] {
+    background:
+        linear-gradient(180deg, #123B5B 0%, #1A527B 55%, #24688F 100%);
+    border-right: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 4px 0 18px rgba(20, 45, 65, 0.08);
+}
+
+[data-testid="stSidebar"] * {
+    color: #FFFFFF !important;
+}
+
+[data-testid="stSidebar"] .block-container {
+    padding-top: 1.1rem;
+    padding-left: 0.9rem;
+    padding-right: 0.9rem;
+}
+
+[data-testid="stSidebar"] img {
+    border-radius: 18px;
+}
 
 [data-testid="stSidebar"] .stButton > button {
     width: 100%;
-    min-height: 46px;
-    color: white !important;
-    border: none !important;
-    border-radius: 12px !important;
-    text-align: left !important;
+    min-height: 44px;
     justify-content: flex-start !important;
-    padding: 10px 16px !important;
-    font-size: 16px !important;
-    font-weight: 500 !important;
-    box-shadow: none !important;
-    margin-bottom: 3px;
-}
+    text-align: left !important;
+    padding: 0.62rem 0.85rem !important;
 
-/* BOTÕES NORMAIS DO MENU */
-[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
     background: transparent !important;
-}
-
-/* HOVER DOS BOTÕES NORMAIS */
-[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
-    background: rgba(255,255,255,0.10) !important;
-}
-
-/* PÁGINA ATUAL */
-[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-    background: rgba(255,255,255,0.18) !important;
-    border-left: 4px solid #56D6E0 !important;
-    padding-left: 12px !important;
-    font-weight: 700 !important;
-}
-
-/* HOVER DA PÁGINA ATUAL */
-[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
-    background: rgba(255,255,255,0.22) !important;
-}
-
-/* REMOVE BORDA AO CLICAR */
-[data-testid="stSidebar"] .stButton > button:focus {
-    color: white !important;
-    box-shadow: none !important;
-}
-
-/* CAMPOS */
-input {
+    border: 1px solid transparent !important;
     border-radius: 10px !important;
+
+    color: rgba(255,255,255,0.92) !important;
+    font-weight: 600 !important;
+
+    box-shadow: none !important;
+    transition: all 0.18s ease;
 }
 
-/* SELECTBOX */
-div[data-baseweb="select"] > div {
-    border-radius: 10px;
+[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(255,255,255,0.10) !important;
+    border-color: rgba(255,255,255,0.10) !important;
+    color: #FFFFFF !important;
+    transform: translateX(2px);
 }
 
-/* CARTÕES */
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: rgba(255,255,255,0.16) !important;
+    color: #FFFFFF !important;
+    border: 1px solid rgba(100, 230, 240, 0.28) !important;
+    box-shadow: inset 3px 0 0 #5DE6F0 !important;
+}
+
+/* =========================================================
+   CARDS / MÉTRICAS
+   ========================================================= */
+
 [data-testid="stMetric"] {
-    background-color: white;
-    border: 1px solid #D7E6F0;
-    padding: 18px;
-    border-radius: 16px;
-    box-shadow: 0px 3px 12px rgba(0,0,0,0.06);
+    background: #FFFFFF;
+    border: 1px solid #ECEEF4;
+    border-radius: 14px;
+    padding: 17px 18px 15px 18px;
+    box-shadow: 0 5px 18px rgba(42, 52, 72, 0.045);
 }
 
-/* DIVISORES */
-hr {
-    border-color: #D7E6F0;
+[data-testid="stMetricLabel"] {
+    color: #8A90A0 !important;
+    font-size: 0.79rem !important;
+    font-weight: 650 !important;
 }
 
-/* ALERTAS - ESTILO POP-UP CENTRAL */
-@keyframes popupEntrada {
-    from {
-        opacity: 0;
-        transform: scale(0.96) translateY(-6px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
+[data-testid="stMetricValue"] {
+    color: #262D3D !important;
+    font-size: 1.75rem !important;
+    font-weight: 780 !important;
+    letter-spacing: -0.035em;
 }
+
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background: #FFFFFF;
+    border: 1px solid #ECEEF4 !important;
+    border-radius: 14px !important;
+    box-shadow: 0 5px 18px rgba(42, 52, 72, 0.04);
+}
+
+/* =========================================================
+   BOTÕES
+   ========================================================= */
+
+.stButton > button,
+.stDownloadButton > button {
+    min-height: 40px;
+    border-radius: 9px !important;
+    font-weight: 650 !important;
+
+    background: #FFFFFF !important;
+    color: #555E70 !important;
+
+    border: 1px solid #E0E3EA !important;
+    box-shadow: none !important;
+
+    transition: all 0.16s ease;
+}
+
+.stButton > button:hover,
+.stDownloadButton > button:hover {
+    border-color: #B9AEF8 !important;
+    color: #5B46D8 !important;
+    background: #FAF9FF !important;
+    transform: translateY(-1px);
+}
+
+/* Botão principal */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #7057E8 0%, #8B6FF4 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    box-shadow: 0 6px 15px rgba(112, 87, 232, 0.20) !important;
+}
+
+/* =========================================================
+   CAMPOS DE FORMULÁRIO
+   ========================================================= */
+
+[data-baseweb="input"] > div,
+[data-baseweb="select"] > div,
+[data-baseweb="textarea"] textarea {
+    background: #FFFFFF !important;
+    border: 1px solid #DEE2E9 !important;
+    border-radius: 9px !important;
+}
+
+[data-baseweb="input"] > div:focus-within,
+[data-baseweb="select"] > div:focus-within {
+    border-color: #8C79EA !important;
+    box-shadow: 0 0 0 3px rgba(140, 121, 234, 0.10) !important;
+}
+
+/* =========================================================
+   EXPANDERS
+   ========================================================= */
+
+[data-testid="stExpander"] {
+    background: #FFFFFF;
+    border: 1px solid #E9EBF1 !important;
+    border-radius: 11px !important;
+    overflow: hidden;
+    box-shadow: 0 3px 12px rgba(44, 53, 75, 0.035);
+}
+
+[data-testid="stExpander"] summary {
+    color: #50596C !important;
+    font-weight: 650 !important;
+}
+
+/* =========================================================
+   RADIO / SEÇÕES
+   ========================================================= */
+
+[role="radiogroup"] {
+    gap: 0.45rem;
+}
+
+[role="radiogroup"] label {
+    background: #FFFFFF;
+    border: 1px solid #E6E8EE;
+    border-radius: 9px;
+    padding: 0.45rem 0.75rem;
+}
+
+/* =========================================================
+   ALERTAS
+   ========================================================= */
 
 [data-testid="stAlert"] {
-    max-width: 720px;
-    margin: 20px auto !important;
-    padding: 18px 22px !important;
-    border-radius: 16px !important;
-    border-width: 2px !important;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.16);
-    animation: popupEntrada 0.20s ease-out;
+    max-width: 820px;
+    margin: 14px auto !important;
+    padding: 14px 17px !important;
+    border-radius: 11px !important;
+    border-width: 1px !important;
+    box-shadow: 0 4px 15px rgba(45, 55, 75, 0.045);
 }
 
-[data-testid="stAlert"] p {
-    font-size: 18px !important;
-    font-weight: 700 !important;
-    text-align: center !important;
-    line-height: 1.45 !important;
+/* =========================================================
+   TABELAS
+   ========================================================= */
+
+[data-testid="stDataFrame"] {
+    background: #FFFFFF;
+    border: 1px solid #E8EAF0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(45, 55, 75, 0.035);
 }
 
-[data-testid="stAlert"] svg {
-    width: 24px !important;
-    height: 24px !important;
+/* =========================================================
+   DETALHES
+   ========================================================= */
+
+hr {
+    border: none;
+    border-top: 1px solid #EAECF1;
+    margin: 1.5rem 0;
 }
 
-/* ESPAÇAMENTO DA PÁGINA */
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
+.stCaption,
+[data-testid="stCaptionContainer"] {
+    color: #9298A7 !important;
+    font-size: 0.82rem !important;
+}
+
+/* Barra de rolagem */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #D0D4DE;
+    border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #B6BBC8;
+}
+
+/* =========================================================
+   LOGIN
+   ========================================================= */
+
+[data-testid="stForm"] {
+    background: #FFFFFF;
+    border: 1px solid #ECEEF4;
+    border-radius: 18px;
+    padding: 1.4rem;
+    box-shadow: 0 12px 35px rgba(44, 53, 75, 0.07);
 }
 
 </style>
@@ -1436,6 +1636,51 @@ if menu == "🏠 Início":
 
 elif menu == "👥 Alunos":
     st.title("Alunos")
+
+    # =========================
+    # QUADROS-RESUMO DE ALUNOS
+    # =========================
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM alunos
+    """)
+    total_alunos_quadro = cursor.fetchone()[0] or 0
+
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM turmas
+    """)
+    total_turmas_quadro = cursor.fetchone()[0] or 0
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(limite_alunos), 0)
+        FROM turmas
+    """)
+    capacidade_total_quadro = cursor.fetchone()[0] or 0
+
+    vagas_quadro = max(
+        capacidade_total_quadro - total_alunos_quadro,
+        0
+    )
+
+    col_alunos_1, col_alunos_2, col_alunos_3 = st.columns(3)
+
+    col_alunos_1.metric(
+        "👥 Alunos cadastrados",
+        total_alunos_quadro
+    )
+
+    col_alunos_2.metric(
+        "🗓️ Turmas",
+        total_turmas_quadro
+    )
+
+    col_alunos_3.metric(
+        "🪑 Vagas disponíveis",
+        vagas_quadro
+    )
+
+    st.divider()
     aba_cadastro, aba_lista, aba_edicao, aba_historico_aluno = st.tabs(
         [
             "➕ Cadastrar",
@@ -3384,6 +3629,114 @@ elif menu == "📅 Turmas":
 elif menu == "✅ Presenças":
     st.title("Presenças")
 
+    # =========================
+    # QUADROS-RESUMO DE PRESENÇAS
+    # =========================
+    hoje_quadro_presenca = date.today()
+
+    nomes_dias_quadro = {
+        0: "Segunda",
+        1: "Terça",
+        2: "Quarta",
+        3: "Quinta",
+        4: "Sexta",
+        5: "Sábado",
+        6: "Domingo"
+    }
+
+    dia_quadro_presenca = nomes_dias_quadro[
+        hoje_quadro_presenca.weekday()
+    ]
+
+    cursor.execute("""
+        SELECT
+            t.id,
+            (
+                SELECT COUNT(*)
+                FROM alunos a
+                WHERE a.turma_id = t.id
+            ) AS total_fixos,
+            (
+                SELECT COUNT(*)
+                FROM reposicoes r
+                WHERE r.turma_reposicao_id = t.id
+                AND r.data_reposicao = ?
+                AND r.status = 'Agendada'
+            ) AS total_reposicoes,
+            (
+                SELECT COUNT(DISTINCT p.aluno_id)
+                FROM presencas p
+                WHERE p.turma_id = t.id
+                AND p.data = ?
+            ) AS total_registrado
+        FROM turmas t
+        WHERE t.dias LIKE ?
+    """, (
+        str(hoje_quadro_presenca),
+        str(hoje_quadro_presenca),
+        f"%{dia_quadro_presenca}%"
+    ))
+
+    turmas_hoje_quadro = cursor.fetchall()
+
+    total_turmas_hoje_quadro = 0
+    total_chamadas_finalizadas_quadro = 0
+
+    for turma_quadro in turmas_hoje_quadro:
+        esperado_quadro = (
+            (turma_quadro[1] or 0)
+            + (turma_quadro[2] or 0)
+        )
+
+        if esperado_quadro <= 0:
+            continue
+
+        total_turmas_hoje_quadro += 1
+
+        if (turma_quadro[3] or 0) >= esperado_quadro:
+            total_chamadas_finalizadas_quadro += 1
+
+    chamadas_pendentes_hoje_quadro = max(
+        total_turmas_hoje_quadro
+        - total_chamadas_finalizadas_quadro,
+        0
+    )
+
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM reposicoes
+        WHERE status = 'Pendente'
+        AND direito_reposicao = 'Sim'
+    """)
+    reposicoes_pendentes_quadro = (
+        cursor.fetchone()[0] or 0
+    )
+
+    col_pres_1, col_pres_2, col_pres_3 = st.columns(3)
+
+    col_pres_1.metric(
+        "📋 Turmas de hoje",
+        total_turmas_hoje_quadro
+    )
+
+    col_pres_2.metric(
+        "✅ Chamadas finalizadas",
+        total_chamadas_finalizadas_quadro
+    )
+
+    col_pres_3.metric(
+        "🔄 Reposições pendentes",
+        reposicoes_pendentes_quadro
+    )
+
+    if chamadas_pendentes_hoje_quadro > 0:
+        st.caption(
+            f"⚠️ {chamadas_pendentes_hoje_quadro} "
+            f"chamada(s) de hoje ainda pendente(s)."
+        )
+
+    st.divider()
+
     secao_presencas = st.radio(
         "Visualização",
         [
@@ -4982,8 +5335,28 @@ elif menu == "✅ Presenças":
                                     ),
                                     use_container_width=True
                                 ):
+                                    # Não apagamos fisicamente o registro,
+                                    # porque a sincronização automática
+                                    # recriaria a reposição a partir da
+                                    # ausência justificada.
+                                    # Marcamos como Dispensada para ela
+                                    # desaparecer das pendentes e não voltar.
                                     cursor.execute("""
-                                        DELETE FROM reposicoes
+                                        UPDATE reposicoes
+                                        SET
+                                            status = 'Dispensada',
+                                            direito_reposicao = 'Não',
+                                            data_reposicao = NULL,
+                                            turma_reposicao_id = NULL,
+                                            observacao = CASE
+                                                WHEN observacao IS NULL
+                                                     OR observacao = ''
+                                                THEN
+                                                    'Reposição dispensada'
+                                                ELSE
+                                                    observacao
+                                                    || ' | Reposição dispensada'
+                                            END
                                         WHERE id = ?
                                         AND status = 'Pendente'
                                     """, (
@@ -4996,7 +5369,7 @@ elif menu == "✅ Presenças":
                                         "mensagem_reposicao_editada"
                                     ] = (
                                         "✅ Reposição excluída "
-                                        "com sucesso!"
+                                        "da lista de pendentes."
                                     )
 
                                     st.rerun()
@@ -5428,6 +5801,228 @@ elif menu == "💰 Financeiro":
     st.title("Financeiro")
 
     from datetime import date
+
+    # =========================
+    # QUADROS-RESUMO FINANCEIROS
+    # =========================
+    hoje_fin_quadro = date.today()
+    inicio_mes_fin_quadro = hoje_fin_quadro.replace(day=1)
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(valor_liquido), 0)
+        FROM financeiro
+        WHERE status = 'Pago'
+        AND data_pagamento BETWEEN ? AND ?
+    """, (
+        str(inicio_mes_fin_quadro),
+        str(hoje_fin_quadro)
+    ))
+
+    recebido_mes_quadro = float(
+        cursor.fetchone()[0] or 0
+    )
+
+    # Dias sem aula para cálculo dos ciclos
+    cursor.execute("""
+        SELECT data
+        FROM dias_sem_aula
+    """)
+
+    dias_sem_aula_fin_quadro = set()
+
+    for registro_dia_fin in cursor.fetchall():
+        valor_dia_fin = registro_dia_fin[0]
+
+        if isinstance(valor_dia_fin, date):
+            dias_sem_aula_fin_quadro.add(
+                valor_dia_fin
+            )
+        else:
+            try:
+                dias_sem_aula_fin_quadro.add(
+                    datetime.strptime(
+                        str(valor_dia_fin)[:10],
+                        "%Y-%m-%d"
+                    ).date()
+                )
+            except Exception:
+                pass
+
+    cursor.execute("""
+        SELECT
+            a.id,
+            a.nome,
+            t.dias,
+            f.data_inicio_ciclo,
+            f.plano
+        FROM alunos a
+        INNER JOIN turmas t
+            ON t.id = a.turma_id
+        LEFT JOIN LATERAL (
+            SELECT
+                data_inicio_ciclo,
+                plano
+            FROM financeiro
+            WHERE aluno_id = a.id
+            AND data_inicio_ciclo IS NOT NULL
+            ORDER BY
+                data_inicio_ciclo DESC,
+                id DESC
+            LIMIT 1
+        ) f ON TRUE
+        WHERE a.turma_id IS NOT NULL
+        ORDER BY a.nome
+    """)
+
+    dados_vencimentos_quadro = cursor.fetchall()
+
+    alunos_a_vencer_quadro = []
+    alunos_atrasados_quadro = []
+
+    for registro_fin_quadro in dados_vencimentos_quadro:
+        nome_fin_quadro = registro_fin_quadro[1]
+        dias_turma_fin_quadro = registro_fin_quadro[2]
+        inicio_ciclo_fin_quadro = registro_fin_quadro[3]
+        plano_fin_quadro = registro_fin_quadro[4] or "8 aulas"
+
+        if not inicio_ciclo_fin_quadro:
+            continue
+
+        if isinstance(
+            inicio_ciclo_fin_quadro,
+            datetime
+        ):
+            inicio_ciclo_fin_quadro = (
+                inicio_ciclo_fin_quadro.date()
+            )
+        elif not isinstance(
+            inicio_ciclo_fin_quadro,
+            date
+        ):
+            try:
+                inicio_ciclo_fin_quadro = (
+                    datetime.strptime(
+                        str(inicio_ciclo_fin_quadro)[:10],
+                        "%Y-%m-%d"
+                    ).date()
+                )
+            except Exception:
+                continue
+
+        quantidade_aulas_fin_quadro = (
+            24
+            if "24" in str(plano_fin_quadro)
+            else 8
+        )
+
+        try:
+            data_renovacao_fin_quadro = (
+                calcular_data_renovacao(
+                    inicio_ciclo_fin_quadro,
+                    dias_turma_fin_quadro,
+                    quantidade_aulas_fin_quadro,
+                    dias_sem_aula_fin_quadro
+                )
+            )
+        except Exception:
+            continue
+
+        if not data_renovacao_fin_quadro:
+            continue
+
+        diferenca_fin_quadro = (
+            data_renovacao_fin_quadro
+            - hoje_fin_quadro
+        ).days
+
+        if diferenca_fin_quadro < 0:
+            alunos_atrasados_quadro.append(
+                (
+                    nome_fin_quadro,
+                    data_renovacao_fin_quadro
+                )
+            )
+
+        elif 0 <= diferenca_fin_quadro <= 7:
+            alunos_a_vencer_quadro.append(
+                (
+                    nome_fin_quadro,
+                    data_renovacao_fin_quadro
+                )
+            )
+
+    col_fin_1, col_fin_2, col_fin_3 = st.columns(3)
+
+    col_fin_1.metric(
+        "💰 Recebido no mês",
+        f"R$ {recebido_mes_quadro:,.2f}"
+        .replace(",", "X")
+        .replace(".", ",")
+        .replace("X", ".")
+    )
+
+    col_fin_2.metric(
+        "🟡 A vencer em 7 dias",
+        len(alunos_a_vencer_quadro)
+    )
+
+    col_fin_3.metric(
+        "🔴 Atrasados",
+        len(alunos_atrasados_quadro)
+    )
+
+    if (
+        alunos_a_vencer_quadro
+        or alunos_atrasados_quadro
+    ):
+        col_lista_1, col_lista_2 = st.columns(2)
+
+        with col_lista_1:
+            with st.expander(
+                "🟡 Ver alunos a vencer",
+                expanded=False
+            ):
+                if not alunos_a_vencer_quadro:
+                    st.caption(
+                        "Nenhum aluno vence nos próximos 7 dias."
+                    )
+                else:
+                    alunos_a_vencer_quadro.sort(
+                        key=lambda item: item[1]
+                    )
+
+                    for nome_vencer, data_vencer in (
+                        alunos_a_vencer_quadro
+                    ):
+                        st.write(
+                            f"**{nome_vencer}** — "
+                            f"{data_vencer.strftime('%d/%m/%Y')}"
+                        )
+
+        with col_lista_2:
+            with st.expander(
+                "🔴 Ver alunos atrasados",
+                expanded=False
+            ):
+                if not alunos_atrasados_quadro:
+                    st.caption(
+                        "Nenhum aluno atrasado."
+                    )
+                else:
+                    alunos_atrasados_quadro.sort(
+                        key=lambda item: item[1],
+                        reverse=True
+                    )
+
+                    for nome_atrasado, data_atrasada in (
+                        alunos_atrasados_quadro
+                    ):
+                        st.write(
+                            f"**{nome_atrasado}** — "
+                            f"{data_atrasada.strftime('%d/%m/%Y')}"
+                        )
+
+    st.divider()
 
     aba_pagamento, aba_historico, aba_edicao = st.tabs(
         [
