@@ -140,6 +140,38 @@ class CursorCompat:
         return self.cursor.fetchall()
 
 cursor = CursorCompat(conn)
+
+# =========================
+# TRANCAMENTOS DE MATRÍCULA
+# =========================
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS trancamentos_matricula
+    (
+        id SERIAL PRIMARY KEY,
+        aluno_id INTEGER NOT NULL,
+        turma_id INTEGER NOT NULL,
+        data_inicio DATE NOT NULL,
+        data_fim_prevista DATE,
+        garantia_ate DATE NOT NULL,
+        vaga_mantida_ate DATE,
+        status TEXT NOT NULL DEFAULT 'Ativo',
+        data_destrancamento DATE,
+        observacao TEXT,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
+
+# Ao chegar ao fim informado, o aluno volta automaticamente.
+cursor.execute("""
+    UPDATE trancamentos_matricula
+    SET status = 'Encerrado'
+    WHERE status = 'Ativo'
+    AND data_fim_prevista IS NOT NULL
+    AND data_fim_prevista < CURRENT_DATE
+""")
+
+conn.commit()
+
 st.set_page_config(
     page_title="Studio de Pilates",
     page_icon="🧘",
@@ -1030,6 +1062,73 @@ if menu == "🏠 Início":
     )
 
     # =========================
+    # ALERTA DE TRANCAMENTOS
+    # =========================
+    cursor.execute("""
+        SELECT
+            a.nome,
+            tm.data_inicio,
+            tm.data_fim_prevista,
+            tm.garantia_ate,
+            tm.vaga_mantida_ate
+        FROM trancamentos_matricula tm
+        INNER JOIN alunos a
+            ON a.id = tm.aluno_id
+        WHERE tm.status = 'Ativo'
+        AND tm.data_inicio <= CURRENT_DATE
+        AND (
+            tm.data_fim_prevista IS NULL
+            OR tm.data_fim_prevista >= CURRENT_DATE
+        )
+        ORDER BY a.nome
+    """)
+
+    trancamentos_inicio = cursor.fetchall()
+
+    trancamentos_precisam_pagamento = []
+
+    for trancamento_inicio in trancamentos_inicio:
+        garantia_inicio = trancamento_inicio[3]
+        mantida_ate_inicio = trancamento_inicio[4]
+
+        protegida_ate_inicio = (
+            mantida_ate_inicio
+            if (
+                mantida_ate_inicio
+                and mantida_ate_inicio > garantia_inicio
+            )
+            else garantia_inicio
+        )
+
+        if protegida_ate_inicio < hoje:
+            trancamentos_precisam_pagamento.append(
+                (
+                    trancamento_inicio[0],
+                    protegida_ate_inicio
+                )
+            )
+
+    if trancamentos_precisam_pagamento:
+        st.warning(
+            f"🔒 {len(trancamentos_precisam_pagamento)} "
+            f"matrícula(s) trancada(s) ultrapassaram o período "
+            f"de garantia da vaga. É necessário confirmar a "
+            f"mensalidade para continuar mantendo a vaga."
+        )
+
+        with st.expander(
+            "Ver alunos que precisam manter a vaga",
+            expanded=False
+        ):
+            for nome_trancado, data_limite in (
+                trancamentos_precisam_pagamento
+            ):
+                st.write(
+                    f"**{nome_trancado}** — garantia encerrada em "
+                    f"{data_limite.strftime('%d/%m/%Y')}"
+                )
+
+    # =========================
     # ALERTA DE CHAMADAS PENDENTES
     # NO TOPO DA PÁGINA INÍCIO
     # Conta somente a partir de 10/11/2026
@@ -1090,6 +1189,26 @@ if menu == "🏠 Início":
         """)
 
         turmas_alerta_chamada = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT
+                aluno_id,
+                turma_id,
+                data_inicio,
+                data_fim_prevista
+            FROM trancamentos_matricula
+            WHERE data_inicio <= ?
+            AND (
+                data_fim_prevista IS NULL
+                OR data_fim_prevista >= ?
+            )
+            AND status IN ('Ativo', 'Encerrado', 'Destrancado')
+        """, (
+            str(ontem_alerta),
+            str(data_inicio_alerta_chamadas)
+        ))
+
+        trancamentos_alerta = cursor.fetchall()
 
         # Quantidade de presenças registradas por turma/data
         cursor.execute("""
@@ -1200,8 +1319,32 @@ if menu == "🏠 Início":
                         )
                     )
 
+                    trancados_na_data_alerta = set()
+
+                    for trancamento_alerta in trancamentos_alerta:
+                        if trancamento_alerta[1] != turma_id_alerta:
+                            continue
+
+                        inicio_tm_alerta = trancamento_alerta[2]
+                        fim_tm_alerta = trancamento_alerta[3]
+
+                        if (
+                            data_verificacao >= inicio_tm_alerta
+                            and (
+                                fim_tm_alerta is None
+                                or data_verificacao <= fim_tm_alerta
+                            )
+                        ):
+                            trancados_na_data_alerta.add(
+                                trancamento_alerta[0]
+                            )
+
                     total_esperado_alerta = (
-                        total_fixos_alerta
+                        max(
+                            total_fixos_alerta
+                            - len(trancados_na_data_alerta),
+                            0
+                        )
                         + total_reposicoes_alerta
                     )
 
@@ -1447,26 +1590,46 @@ if menu == "🏠 Início":
                         diferenca
                     )
                 )
-
     st.divider()
     st.subheader("🔔 Renovações")
 
+    if "filtro_renovacoes_inicio" not in st.session_state:
+        st.session_state["filtro_renovacoes_inicio"] = ""
+
     col1, col2, col3 = st.columns(3)
 
-    col1.metric(
-        "🔴 Atrasadas",
-        len(renovacoes_atrasadas)
-    )
+    with col1:
+        with st.container(border=True):
+            st.markdown("##### 🔴 Atrasadas")
+            st.markdown(f"### {len(renovacoes_atrasadas)}")
+            if st.button(
+                "Ver informações",
+                key="inicio_btn_renovacoes_atrasadas",
+                use_container_width=True
+            ):
+                st.session_state["filtro_renovacoes_inicio"] = "Atrasada"
 
-    col2.metric(
-        "📅 Hoje",
-        len(renovacoes_hoje)
-    )
+    with col2:
+        with st.container(border=True):
+            st.markdown("##### 📅 Hoje")
+            st.markdown(f"### {len(renovacoes_hoje)}")
+            if st.button(
+                "Ver informações",
+                key="inicio_btn_renovacoes_hoje",
+                use_container_width=True
+            ):
+                st.session_state["filtro_renovacoes_inicio"] = "Hoje"
 
-    col3.metric(
-        "⚠️ Próximos 7 dias",
-        len(renovacoes_proximas)
-    )
+    with col3:
+        with st.container(border=True):
+            st.markdown("##### ⚠️ Próximos 7 dias")
+            st.markdown(f"### {len(renovacoes_proximas)}")
+            if st.button(
+                "Ver informações",
+                key="inicio_btn_renovacoes_proximas",
+                use_container_width=True
+            ):
+                st.session_state["filtro_renovacoes_inicio"] = "Próxima"
 
     total_alertas = (
         len(renovacoes_atrasadas)
@@ -1474,99 +1637,117 @@ if menu == "🏠 Início":
         + len(renovacoes_proximas)
     )
 
-    if total_alertas == 0:
-        st.caption(
-            "✅ Nenhuma renovação prevista "
-            "para os próximos 7 dias."
-        )
+    lista_renovacoes = []
 
-    else:
-        lista_renovacoes = []
-
-        for (
-            nome,
-            data_renovacao,
-            dias_atraso
-        ) in renovacoes_atrasadas:
-            lista_renovacoes.append(
-                (
-                    nome,
-                    data_renovacao,
-                    "Atrasada",
-                    dias_atraso
-                )
-            )
-
-        for nome, data_renovacao in renovacoes_hoje:
-            lista_renovacoes.append(
-                (
-                    nome,
-                    data_renovacao,
-                    "Hoje",
-                    0
-                )
-            )
-
-        for (
-            nome,
-            data_renovacao,
-            dias_restantes
-        ) in renovacoes_proximas:
-            lista_renovacoes.append(
-                (
-                    nome,
-                    data_renovacao,
-                    "Próxima",
-                    dias_restantes
-                )
-            )
-
-        lista_renovacoes.sort(
-            key=lambda item: (
-                abs(
-                    (
-                        item[1]
-                        - hoje
-                    ).days
-                ),
-                item[1]
-            )
-        )
-
-        with st.expander(
-            f"Ver detalhes das renovações "
-            f"({total_alertas})",
-            expanded=False
-        ):
-            for (
+    for (
+        nome,
+        data_renovacao,
+        dias_atraso
+    ) in renovacoes_atrasadas:
+        lista_renovacoes.append(
+            (
                 nome,
                 data_renovacao,
-                tipo,
-                quantidade_dias
-            ) in lista_renovacoes:
+                "Atrasada",
+                dias_atraso
+            )
+        )
 
-                if tipo == "Hoje":
-                    status_texto = (
-                        "📅 vence hoje"
+    for nome, data_renovacao in renovacoes_hoje:
+        lista_renovacoes.append(
+            (
+                nome,
+                data_renovacao,
+                "Hoje",
+                0
+            )
+        )
+
+    for (
+        nome,
+        data_renovacao,
+        dias_restantes
+    ) in renovacoes_proximas:
+        lista_renovacoes.append(
+            (
+                nome,
+                data_renovacao,
+                "Próxima",
+                dias_restantes
+            )
+        )
+
+    lista_renovacoes.sort(
+        key=lambda item: (
+            abs((item[1] - hoje).days),
+            item[1]
+        )
+    )
+
+    if total_alertas == 0:
+        st.caption(
+            "✅ Nenhuma renovação prevista para os próximos 7 dias."
+        )
+    else:
+        filtro_ativo = st.session_state.get(
+            "filtro_renovacoes_inicio",
+            ""
+        )
+
+        if filtro_ativo:
+            with st.container(border=True):
+                topo1, topo2 = st.columns([5, 1])
+
+                with topo1:
+                    st.markdown(
+                        f"#### 📋 Detalhes: {filtro_ativo}"
                     )
 
-                elif tipo == "Atrasada":
-                    status_texto = (
-                        f"🔴 {quantidade_dias} "
-                        f"dia(s) em atraso"
+                with topo2:
+                    if st.button(
+                        "Limpar",
+                        key="limpar_filtro_renovacoes_inicio",
+                        use_container_width=True
+                    ):
+                        st.session_state["filtro_renovacoes_inicio"] = ""
+                        st.rerun()
+
+                exibidos = 0
+
+                for (
+                    nome,
+                    data_renovacao,
+                    tipo,
+                    quantidade_dias
+                ) in lista_renovacoes:
+                    if tipo != filtro_ativo:
+                        continue
+
+                    exibidos += 1
+
+                    if tipo == "Hoje":
+                        status_texto = "📅 vence hoje"
+                    elif tipo == "Atrasada":
+                        status_texto = (
+                            f"🔴 {quantidade_dias} dia(s) em atraso"
+                        )
+                    else:
+                        status_texto = (
+                            f"⚠️ vence em {quantidade_dias} dia(s)"
+                        )
+
+                    st.write(
+                        f"**{nome}** — {data_renovacao.strftime('%d/%m/%Y')} | {status_texto}"
                     )
 
-                else:
-                    status_texto = (
-                        f"⚠️ vence em "
-                        f"{quantidade_dias} dia(s)"
+                if exibidos == 0:
+                    st.caption(
+                        "Nenhum registro para esse quadro."
                     )
-
-                st.write(
-                    f"**{nome}** — "
-                    f"{data_renovacao.strftime('%d/%m/%Y')} "
-                    f"| {status_texto}"
-                )
+        else:
+            st.caption(
+                "Clique em um dos quadros acima para ver os detalhes."
+            )
 
     # =========================
     # PILATES
@@ -1831,7 +2012,22 @@ elif menu == "👥 Alunos":
         0
     )
 
-    col_alunos_1, col_alunos_2, col_alunos_3 = st.columns(3)
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM trancamentos_matricula
+        WHERE status = 'Ativo'
+        AND data_inicio <= CURRENT_DATE
+        AND (
+            data_fim_prevista IS NULL
+            OR data_fim_prevista >= CURRENT_DATE
+        )
+    """)
+
+    total_trancados_quadro = cursor.fetchone()[0] or 0
+
+    col_alunos_1, col_alunos_2, col_alunos_3, col_alunos_4 = (
+        st.columns(4)
+    )
 
     col_alunos_1.metric(
         "👥 Alunos cadastrados",
@@ -1844,8 +2040,13 @@ elif menu == "👥 Alunos":
     )
 
     col_alunos_3.metric(
-        "🪑 Vagas disponíveis",
+        "🪑 Vagas fixas disponíveis",
         vagas_quadro
+    )
+
+    col_alunos_4.metric(
+        "🔒 Matrículas trancadas",
+        total_trancados_quadro
     )
 
     st.divider()
@@ -1859,11 +2060,18 @@ elif menu == "👥 Alunos":
         else "➕ Cadastrar"
     )
 
-    aba_cadastro, aba_lista, aba_edicao, aba_historico_aluno = st.tabs(
+    (
+        aba_cadastro,
+        aba_lista,
+        aba_edicao,
+        aba_trancamento,
+        aba_historico_aluno
+    ) = st.tabs(
         [
             "➕ Cadastrar",
             "👥 Alunos cadastrados",
             "✏️ Editar / Excluir",
+            "🔒 Trancar / Destrancar",
             "📚 Histórico do aluno"
         ],
         default=aba_padrao_alunos
@@ -2518,7 +2726,337 @@ elif menu == "👥 Alunos":
 
                         st.rerun()
     # =========================
-    # ABA 4 - HISTÓRICO DO ALUNO
+    # TRANCAR / DESTRANCAR MATRÍCULA
+    # =========================
+    with aba_trancamento:
+        st.subheader("🔒 Trancar / Destrancar matrícula")
+
+        st.caption(
+            "Durante o trancamento o aluno não entra na chamada e "
+            "a vaga fica temporariamente disponível para reposições. "
+            "A vaga fixa continua pertencendo ao aluno."
+        )
+
+        col_novo_trancamento, col_trancados = st.columns(2)
+
+        # -------------------------
+        # NOVO TRANCAMENTO
+        # -------------------------
+        with col_novo_trancamento:
+            with st.container(border=True):
+                st.markdown("### 🔒 Novo trancamento")
+
+                cursor.execute("""
+                    SELECT
+                        a.id,
+                        a.nome,
+                        a.turma_id,
+                        t.dias,
+                        t.horario
+                    FROM alunos a
+                    INNER JOIN turmas t
+                        ON t.id = a.turma_id
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM trancamentos_matricula tm
+                        WHERE tm.aluno_id = a.id
+                        AND tm.status = 'Ativo'
+                    )
+                    ORDER BY a.nome
+                """)
+
+                alunos_para_trancar = cursor.fetchall()
+
+                opcoes_trancar = {
+                    f"{a[1]} | {a[3]} - {a[4]}": a
+                    for a in alunos_para_trancar
+                }
+
+                aluno_trancar_label = st.selectbox(
+                    "Aluno",
+                    list(opcoes_trancar.keys()),
+                    index=None,
+                    placeholder="Selecione o aluno",
+                    key="aluno_trancar_matricula"
+                )
+
+                data_inicio_trancamento = st.date_input(
+                    "Início do trancamento",
+                    value=date.today(),
+                    key="inicio_trancamento_matricula"
+                )
+
+                data_fim_trancamento = st.date_input(
+                    "Previsão de retorno",
+                    value=date.today() + timedelta(days=15),
+                    min_value=data_inicio_trancamento,
+                    key="fim_trancamento_matricula"
+                )
+
+                garantia_ate_novo = (
+                    data_inicio_trancamento
+                    + timedelta(days=30)
+                )
+
+                st.info(
+                    "🛡️ A vaga estará garantida sem mensalidade até "
+                    f"{garantia_ate_novo.strftime('%d/%m/%Y')}."
+                )
+
+                if data_fim_trancamento > garantia_ate_novo:
+                    st.warning(
+                        "⚠️ O período informado ultrapassa os 30 dias "
+                        "de garantia. Depois dessa data será necessário "
+                        "confirmar a mensalidade para manter a vaga."
+                    )
+
+                observacao_trancamento = st.text_input(
+                    "Observação",
+                    placeholder="Opcional",
+                    key="observacao_trancamento"
+                )
+
+                if st.button(
+                    "🔒 Trancar matrícula",
+                    key="confirmar_trancamento_matricula",
+                    use_container_width=True
+                ):
+                    if aluno_trancar_label is None:
+                        st.warning("Selecione o aluno.")
+                    else:
+                        dados_trancar = opcoes_trancar[
+                            aluno_trancar_label
+                        ]
+
+                        cursor.execute("""
+                            INSERT INTO trancamentos_matricula
+                            (
+                                aluno_id,
+                                turma_id,
+                                data_inicio,
+                                data_fim_prevista,
+                                garantia_ate,
+                                observacao,
+                                status
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, 'Ativo')
+                        """, (
+                            dados_trancar[0],
+                            dados_trancar[2],
+                            str(data_inicio_trancamento),
+                            str(data_fim_trancamento),
+                            str(garantia_ate_novo),
+                            observacao_trancamento
+                        ))
+
+                        conn.commit()
+
+                        st.success(
+                            "✅ Matrícula trancada. A vaga temporária "
+                            "já poderá ser usada no mapa de reposições."
+                        )
+                        st.rerun()
+
+        # -------------------------
+        # TRANCAMENTOS ATIVOS
+        # -------------------------
+        with col_trancados:
+            with st.container(border=True):
+                st.markdown("### 🔐 Matrículas trancadas")
+
+                cursor.execute("""
+                    SELECT
+                        tm.id,
+                        tm.aluno_id,
+                        a.nome,
+                        tm.data_inicio,
+                        tm.data_fim_prevista,
+                        tm.garantia_ate,
+                        tm.vaga_mantida_ate,
+                        t.dias,
+                        t.horario
+                    FROM trancamentos_matricula tm
+                    INNER JOIN alunos a
+                        ON a.id = tm.aluno_id
+                    INNER JOIN turmas t
+                        ON t.id = tm.turma_id
+                    WHERE tm.status = 'Ativo'
+                    ORDER BY tm.data_inicio, a.nome
+                """)
+
+                trancamentos_ativos = cursor.fetchall()
+
+                if not trancamentos_ativos:
+                    st.caption(
+                        "Nenhuma matrícula trancada no momento."
+                    )
+                else:
+                    for trancamento in trancamentos_ativos:
+                        (
+                            trancamento_id,
+                            aluno_id_trancado,
+                            nome_trancado,
+                            inicio_trancado,
+                            fim_trancado,
+                            garantia_trancado,
+                            mantida_ate_trancado,
+                            dias_trancado,
+                            horario_trancado
+                        ) = trancamento
+
+                        protegida_ate = (
+                            mantida_ate_trancado
+                            if (
+                                mantida_ate_trancado
+                                and mantida_ate_trancado > garantia_trancado
+                            )
+                            else garantia_trancado
+                        )
+
+                        with st.expander(
+                            f"🔒 {nome_trancado} | "
+                            f"{dias_trancado} - {horario_trancado}",
+                            expanded=False
+                        ):
+                            st.write(
+                                f"**Início:** "
+                                f"{inicio_trancado.strftime('%d/%m/%Y')}"
+                            )
+
+                            if fim_trancado:
+                                st.write(
+                                    f"**Previsão de retorno:** "
+                                    f"{fim_trancado.strftime('%d/%m/%Y')}"
+                                )
+
+                            st.write(
+                                f"**Vaga protegida até:** "
+                                f"{protegida_ate.strftime('%d/%m/%Y')}"
+                            )
+
+                            if date.today() > protegida_ate:
+                                st.error(
+                                    "⚠️ O prazo de garantia da vaga terminou. "
+                                    "É necessário confirmar a mensalidade "
+                                    "para continuar mantendo a vaga."
+                                )
+
+                                if st.button(
+                                    "💳 Confirmar mensalidade e manter vaga +30 dias",
+                                    key=(
+                                        f"manter_vaga_trancada_"
+                                        f"{trancamento_id}"
+                                    ),
+                                    use_container_width=True
+                                ):
+                                    nova_manutencao_ate = (
+                                        date.today()
+                                        + timedelta(days=30)
+                                    )
+
+                                    cursor.execute("""
+                                        UPDATE trancamentos_matricula
+                                        SET vaga_mantida_ate = ?
+                                        WHERE id = ?
+                                        AND status = 'Ativo'
+                                    """, (
+                                        str(nova_manutencao_ate),
+                                        trancamento_id
+                                    ))
+
+                                    conn.commit()
+                                    st.rerun()
+                            else:
+                                dias_restantes_garantia = (
+                                    protegida_ate - date.today()
+                                ).days
+
+                                st.success(
+                                    f"✅ Vaga garantida por mais "
+                                    f"{dias_restantes_garantia} dia(s)."
+                                )
+
+                            if st.button(
+                                "🔓 Destrancar agora",
+                                key=(
+                                    f"destrancar_matricula_"
+                                    f"{trancamento_id}"
+                                ),
+                                use_container_width=True
+                            ):
+                                cursor.execute("""
+                                    UPDATE trancamentos_matricula
+                                    SET
+                                        status = 'Destrancado',
+                                        data_destrancamento = ?
+                                    WHERE id = ?
+                                    AND status = 'Ativo'
+                                """, (
+                                    str(date.today()),
+                                    trancamento_id
+                                ))
+
+                                conn.commit()
+
+                                st.success(
+                                    "✅ Matrícula destrancada. "
+                                    "O aluno volta às chamadas imediatamente."
+                                )
+                                st.rerun()
+
+        with st.expander(
+            "📚 Histórico de trancamentos",
+            expanded=False
+        ):
+            cursor.execute("""
+                SELECT
+                    a.nome,
+                    tm.data_inicio,
+                    tm.data_fim_prevista,
+                    tm.data_destrancamento,
+                    tm.status,
+                    tm.garantia_ate,
+                    tm.vaga_mantida_ate
+                FROM trancamentos_matricula tm
+                INNER JOIN alunos a
+                    ON a.id = tm.aluno_id
+                ORDER BY tm.id DESC
+            """)
+
+            historico_trancamentos = cursor.fetchall()
+
+            if not historico_trancamentos:
+                st.caption("Nenhum trancamento registrado.")
+            else:
+                for registro_trancamento in historico_trancamentos:
+                    nome_hist = registro_trancamento[0]
+                    inicio_hist = registro_trancamento[1]
+                    fim_hist = registro_trancamento[2]
+                    destrancado_hist = registro_trancamento[3]
+                    status_hist = registro_trancamento[4]
+
+                    texto_hist = (
+                        f"**{nome_hist}** — "
+                        f"{inicio_hist.strftime('%d/%m/%Y')}"
+                    )
+
+                    if fim_hist:
+                        texto_hist += (
+                            f" a {fim_hist.strftime('%d/%m/%Y')}"
+                        )
+
+                    texto_hist += f" | {status_hist}"
+
+                    if destrancado_hist:
+                        texto_hist += (
+                            f" em "
+                            f"{destrancado_hist.strftime('%d/%m/%Y')}"
+                        )
+
+                    st.write(texto_hist)
+
+    # =========================
+    # ABA 5 - HISTÓRICO DO ALUNO
     # =========================
     with aba_historico_aluno:
         st.subheader("Histórico do aluno")
@@ -3731,8 +4269,7 @@ elif menu == "📅 Turmas":
         st.subheader("Alunos por turma")
 
         st.caption(
-            "Abra o grupo de dias e depois o horário "
-            "para visualizar os alunos matriculados."
+            "Selecione um quadro de dias para visualizar as turmas e os alunos correspondentes."
         )
 
         cursor.execute("""
@@ -3765,27 +4302,16 @@ elif menu == "📅 Turmas":
         turmas_consulta = cursor.fetchall()
 
         if len(turmas_consulta) == 0:
-            st.info(
-                "Nenhuma turma cadastrada."
-            )
+            st.info("Nenhuma turma cadastrada.")
 
         else:
             grupos_turmas = {}
 
             for turma in turmas_consulta:
-                dias_grupo = (
-                    turma[1]
-                    or "Outros dias"
-                )
-
+                dias_grupo = turma[1] or "Outros dias"
                 if dias_grupo not in grupos_turmas:
-                    grupos_turmas[
-                        dias_grupo
-                    ] = []
-
-                grupos_turmas[
-                    dias_grupo
-                ].append(turma)
+                    grupos_turmas[dias_grupo] = []
+                grupos_turmas[dias_grupo].append(turma)
 
             ordem_grupos = [
                 "Segunda e Quinta",
@@ -3794,114 +4320,90 @@ elif menu == "📅 Turmas":
             ]
 
             grupos_ordenados = []
-
             for grupo in ordem_grupos:
                 if grupo in grupos_turmas:
-                    grupos_ordenados.append(
-                        (
-                            grupo,
-                            grupos_turmas[grupo]
-                        )
-                    )
-
-            for grupo, lista_grupo in (
-                grupos_turmas.items()
-            ):
+                    grupos_ordenados.append((grupo, grupos_turmas[grupo]))
+            for grupo, lista_grupo in grupos_turmas.items():
                 if grupo not in ordem_grupos:
-                    grupos_ordenados.append(
-                        (
-                            grupo,
-                            lista_grupo
-                        )
-                    )
+                    grupos_ordenados.append((grupo, lista_grupo))
 
-            for (
-                dias_grupo,
-                turmas_grupo
-            ) in grupos_ordenados:
+            if "grupo_turma_selecionado" not in st.session_state:
+                st.session_state["grupo_turma_selecionado"] = ""
 
-                total_alunos_grupo = sum(
-                    int(t[5] or 0)
-                    for t in turmas_grupo
-                )
+            quadros_cols = st.columns(3)
 
+            for indice, (dias_grupo, turmas_grupo) in enumerate(grupos_ordenados):
+                total_alunos_grupo = sum(int(t[5] or 0) for t in turmas_grupo)
                 total_vagas_grupo = sum(
-                    max(
-                        int(t[4] or 4)
-                        - int(t[5] or 0),
-                        0
-                    )
+                    max(int(t[4] or 4) - int(t[5] or 0), 0)
                     for t in turmas_grupo
                 )
 
-                with st.expander(
-                    (
-                        f"🔵 {dias_grupo}  •  "
-                        f"{len(turmas_grupo)} turma(s)  •  "
-                        f"{total_alunos_grupo} aluno(s)  •  "
-                        f"{total_vagas_grupo} vaga(s)"
-                    ),
-                    expanded=False
-                ):
+                with quadros_cols[indice % 3]:
+                    with st.container(border=True):
+                        st.markdown(f"#### 📅 {dias_grupo}")
+                        info_a, info_b, info_c = st.columns(3)
+                        info_a.metric("Turmas", len(turmas_grupo))
+                        info_b.metric("Alunos", total_alunos_grupo)
+                        info_c.metric("Vagas", total_vagas_grupo)
 
-                    for turma in turmas_grupo:
-                        turma_id = turma[0]
-                        horario = (
-                            turma[2]
-                            or "Sem horário"
-                        )
-                        instrutor = (
-                            turma[3]
-                            or "Não informado"
-                        )
-                        limite = int(
-                            turma[4] or 4
-                        )
-                        total_alunos = int(
-                            turma[5] or 0
-                        )
-                        vagas = max(
-                            limite
-                            - total_alunos,
-                            0
-                        )
-
-                        if vagas == 0:
-                            status_vaga = "🔴 Lotada"
-                        elif vagas == 1:
-                            status_vaga = "🟡 1 vaga"
-                        else:
-                            status_vaga = (
-                                f"🟢 {vagas} vagas"
-                            )
-
-                        with st.expander(
-                            (
-                                f"⚪ {horario}  •  "
-                                f"{total_alunos}/{limite} alunos  •  "
-                                f"{status_vaga}"
-                            ),
-                            expanded=False
+                        if st.button(
+                            "Ver informações",
+                            key=f"selecionar_grupo_turma_{indice}",
+                            use_container_width=True
                         ):
+                            st.session_state["grupo_turma_selecionado"] = dias_grupo
+                            st.rerun()
 
-                            col_info_1, col_info_2, col_info_3 = (
-                                st.columns(3)
-                            )
+            grupo_selecionado = st.session_state.get(
+                "grupo_turma_selecionado",
+                ""
+            )
 
-                            col_info_1.metric(
-                                "👥 Alunos",
-                                total_alunos
-                            )
+            if grupo_selecionado in grupos_turmas:
+                st.divider()
+                topo_grupo_1, topo_grupo_2 = st.columns([5, 1])
 
-                            col_info_2.metric(
-                                "🪑 Vagas",
-                                vagas
-                            )
+                with topo_grupo_1:
+                    st.markdown(
+                        f"### 👥 {grupo_selecionado}"
+                    )
 
-                            col_info_3.metric(
-                                "🎓 Instrutor",
-                                instrutor
-                            )
+                with topo_grupo_2:
+                    if st.button(
+                        "Fechar",
+                        key="fechar_grupo_turma_selecionado",
+                        use_container_width=True
+                    ):
+                        st.session_state["grupo_turma_selecionado"] = ""
+                        st.rerun()
+
+                colunas_turmas = st.columns(2)
+
+                for indice_turma, turma in enumerate(grupos_turmas[grupo_selecionado]):
+                    turma_id = turma[0]
+                    horario = turma[2] or "Sem horário"
+                    instrutor = turma[3] or "Não informado"
+                    limite = int(turma[4] or 4)
+                    total_alunos = int(turma[5] or 0)
+                    vagas = max(limite - total_alunos, 0)
+
+                    if vagas == 0:
+                        status_vaga = "🔴 Lotada"
+                    elif vagas == 1:
+                        status_vaga = "🟡 1 vaga"
+                    else:
+                        status_vaga = f"🟢 {vagas} vagas"
+
+                    with colunas_turmas[indice_turma % 2]:
+                        with st.container(border=True):
+                            st.markdown(f"#### 🕐 {horario}")
+                            st.caption(f"🎓 Instrutor: {instrutor}")
+
+                            info_1, info_2 = st.columns(2)
+                            info_1.metric("Alunos", total_alunos)
+                            info_2.metric("Vagas", vagas)
+                            st.caption(status_vaga)
 
                             cursor.execute("""
                                 SELECT
@@ -3916,64 +4418,34 @@ elif menu == "📅 Turmas":
                                 turma_id,
                             ))
 
-                            alunos_da_turma = (
-                                cursor.fetchall()
-                            )
+                            alunos_da_turma = cursor.fetchall()
 
-                            st.markdown(
-                                "#### 👥 Alunos matriculados"
-                            )
+                            st.markdown("**Alunos matriculados**")
 
-                            if len(
-                                alunos_da_turma
-                            ) == 0:
+                            if len(alunos_da_turma) == 0:
                                 st.caption(
-                                    "Nenhum aluno cadastrado "
-                                    "nesta turma."
+                                    "Nenhum aluno cadastrado nesta turma."
                                 )
-
                             else:
-                                for (
-                                    numero,
-                                    aluno
-                                ) in enumerate(
-                                    alunos_da_turma,
-                                    start=1
-                                ):
-                                    nome_aluno = (
-                                        aluno[1]
-                                    )
+                                for numero, aluno in enumerate(alunos_da_turma, start=1):
+                                    nome_aluno = aluno[1]
+                                    telefone_aluno = aluno[2] or "Não informado"
+                                    tabela_aluno = aluno[3] or "Não informada"
 
-                                    telefone_aluno = (
-                                        aluno[2]
-                                        or "Não informado"
-                                    )
-
-                                    tabela_aluno = (
-                                        aluno[3]
-                                        or "Não informada"
-                                    )
-
-                                    with st.container(
-                                        border=True
+                                    if st.button(
+                                        f"👤 {numero}. {nome_aluno}",
+                                        key=f"historico_turma_aluno_{aluno[0]}_{turma_id}",
+                                        use_container_width=True
                                     ):
-                                        if st.button(
-                                            f"👤 {numero}. {nome_aluno}",
-                                            key=(
-                                                f"historico_turma_aluno_"
-                                                f"{aluno[0]}_{turma_id}"
-                                            ),
-                                            use_container_width=True
-                                        ):
-                                            abrir_historico_aluno(
-                                                aluno[0]
-                                            )
+                                        abrir_historico_aluno(aluno[0])
 
-                                        st.caption(
-                                            f"📱 {telefone_aluno}  •  "
-                                            f"💳 Tabela: "
-                                            f"{tabela_aluno}"
-                                        )
+                                    st.caption(
+                                        f"📱 {telefone_aluno}  •  💳 Tabela: {tabela_aluno}"
+                                    )
+            else:
+                st.info(
+                    "Clique em um dos quadros acima para visualizar as turmas daquele grupo de dias."
+                )
 
 elif menu == "✅ Presenças":
     st.title("Presenças")
@@ -4004,6 +4476,18 @@ elif menu == "✅ Presenças":
                 SELECT COUNT(*)
                 FROM alunos a
                 WHERE a.turma_id = t.id
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM trancamentos_matricula tm
+                    WHERE tm.aluno_id = a.id
+                    AND tm.status = 'Ativo'
+                    AND ? BETWEEN
+                        tm.data_inicio
+                        AND COALESCE(
+                            tm.data_fim_prevista,
+                            DATE '9999-12-31'
+                        )
+                )
             ) AS total_fixos,
             (
                 SELECT COUNT(*)
@@ -4021,6 +4505,7 @@ elif menu == "✅ Presenças":
         FROM turmas t
         WHERE t.dias LIKE ?
     """, (
+        str(hoje_quadro_presenca),
         str(hoje_quadro_presenca),
         str(hoje_quadro_presenca),
         f"%{dia_quadro_presenca}%"
@@ -4146,6 +4631,18 @@ elif menu == "✅ Presenças":
                     SELECT COUNT(*)
                     FROM alunos a
                     WHERE a.turma_id = t.id
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM trancamentos_matricula tm
+                        WHERE tm.aluno_id = a.id
+                        AND tm.status = 'Ativo'
+                        AND ? BETWEEN
+                            tm.data_inicio
+                            AND COALESCE(
+                                tm.data_fim_prevista,
+                                DATE '9999-12-31'
+                            )
+                    )
                 ) AS total_fixos,
 
                 (
@@ -4167,6 +4664,7 @@ elif menu == "✅ Presenças":
             WHERE t.dias LIKE ?
             ORDER BY t.horario
         """, (
+            str(data_aula),
             str(data_aula),
             str(data_aula),
             f"%{dia_semana_nome}%"
@@ -4636,12 +5134,25 @@ elif menu == "✅ Presenças":
                     # ALUNOS FIXOS
                     # =========================
                     cursor.execute("""
-                        SELECT id, nome
-                        FROM alunos
-                        WHERE turma_id = ?
-                        ORDER BY nome
+                        SELECT a.id, a.nome
+                        FROM alunos a
+                        WHERE a.turma_id = ?
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM trancamentos_matricula tm
+                            WHERE tm.aluno_id = a.id
+                            AND tm.status = 'Ativo'
+                            AND ? BETWEEN
+                                tm.data_inicio
+                                AND COALESCE(
+                                    tm.data_fim_prevista,
+                                    DATE '9999-12-31'
+                                )
+                        )
+                        ORDER BY a.nome
                     """, (
                         turma_id_presenca,
+                        str(data_aula)
                     ))
 
                     alunos_turma = cursor.fetchall()
@@ -5474,6 +5985,492 @@ elif menu == "✅ Presenças":
         st.subheader("Reposições")
 
         # =========================
+        # VAGAS LIBERADAS / AUSÊNCIAS FUTURAS
+        # =========================
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ausencias_futuras
+            (
+                id SERIAL PRIMARY KEY,
+                aluno_id INTEGER NOT NULL,
+                turma_id INTEGER NOT NULL,
+                data DATE NOT NULL,
+                observacao TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (aluno_id, data)
+            )
+        """)
+
+        conn.commit()
+
+        col_ausencia_futura, col_mapa_vagas = st.columns(2)
+
+        # =========================
+        # AVISAR AUSÊNCIA FUTURA
+        # =========================
+        with col_ausencia_futura:
+            with st.expander(
+                "📅 Avisar ausência futura",
+                expanded=False
+            ):
+                st.caption(
+                    "Use quando você já souber que um aluno não virá. "
+                    "A vaga dele será liberada para encaixe naquela data."
+                )
+
+                cursor.execute("""
+                    SELECT
+                        a.id,
+                        a.nome,
+                        a.turma_id,
+                        t.dias,
+                        t.horario
+                    FROM alunos a
+                    INNER JOIN turmas t
+                        ON t.id = a.turma_id
+                    ORDER BY a.nome
+                """)
+
+                alunos_ausencia_futura = cursor.fetchall()
+
+                opcoes_ausencia_futura = {
+                    (
+                        f"{a[1]} | {a[3]} - {a[4]}"
+                    ): a
+                    for a in alunos_ausencia_futura
+                }
+
+                if len(opcoes_ausencia_futura) == 0:
+                    st.info("Nenhum aluno com turma cadastrada.")
+                else:
+                    aluno_ausencia_label = st.selectbox(
+                        "Aluno",
+                        list(opcoes_ausencia_futura.keys()),
+                        index=None,
+                        placeholder="Selecione o aluno",
+                        key="aluno_ausencia_futura"
+                    )
+
+                    data_ausencia_futura = st.date_input(
+                        "Data em que não virá",
+                        value=date.today(),
+                        min_value=date.today(),
+                        key="data_ausencia_futura"
+                    )
+
+                    observacao_ausencia_futura = st.text_input(
+                        "Observação",
+                        placeholder="Opcional",
+                        key="observacao_ausencia_futura"
+                    )
+
+                    pode_salvar_ausencia = False
+                    dados_aluno_ausencia = None
+
+                    if aluno_ausencia_label:
+                        dados_aluno_ausencia = opcoes_ausencia_futura[
+                            aluno_ausencia_label
+                        ]
+
+                        if (
+                            data_ausencia_futura.weekday()
+                            in obter_dias_semana(
+                                dados_aluno_ausencia[3]
+                            )
+                        ):
+                            pode_salvar_ausencia = True
+                            st.caption(
+                                f"✅ Esta data corresponde à turma "
+                                f"{dados_aluno_ausencia[3]} - "
+                                f"{dados_aluno_ausencia[4]}."
+                            )
+                        else:
+                            st.warning(
+                                "Essa data não corresponde aos dias "
+                                "da turma regular desse aluno."
+                            )
+
+                    if (
+                        pode_salvar_ausencia
+                        and st.button(
+                            "✅ Liberar vaga",
+                            key="salvar_ausencia_futura",
+                            use_container_width=True
+                        )
+                    ):
+                        cursor.execute("""
+                            INSERT INTO ausencias_futuras
+                            (
+                                aluno_id,
+                                turma_id,
+                                data,
+                                observacao
+                            )
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT (aluno_id, data)
+                            DO UPDATE SET
+                                turma_id = EXCLUDED.turma_id,
+                                observacao = EXCLUDED.observacao
+                        """, (
+                            dados_aluno_ausencia[0],
+                            dados_aluno_ausencia[2],
+                            str(data_ausencia_futura),
+                            observacao_ausencia_futura
+                        ))
+
+                        conn.commit()
+
+                        st.session_state[
+                            "mensagem_reposicao_editada"
+                        ] = (
+                            "✅ Ausência futura registrada. "
+                            "A vaga já entra no mapa de encaixes."
+                        )
+
+                        st.rerun()
+
+                cursor.execute("""
+                    SELECT
+                        af.id,
+                        a.nome,
+                        af.data,
+                        t.dias,
+                        t.horario
+                    FROM ausencias_futuras af
+                    INNER JOIN alunos a
+                        ON a.id = af.aluno_id
+                    INNER JOIN turmas t
+                        ON t.id = af.turma_id
+                    WHERE af.data >= ?
+                    ORDER BY af.data, t.horario, a.nome
+                """, (
+                    str(date.today()),
+                ))
+
+                ausencias_futuras_registradas = cursor.fetchall()
+
+                if ausencias_futuras_registradas:
+                    st.markdown("**Vagas já liberadas**")
+
+                    for ausencia_futura in ausencias_futuras_registradas:
+                        col_info_af, col_cancelar_af = st.columns([4, 1])
+
+                        with col_info_af:
+                            st.caption(
+                                f"{ausencia_futura[2]} | "
+                                f"{ausencia_futura[4]} | "
+                                f"{ausencia_futura[1]}"
+                            )
+
+                        with col_cancelar_af:
+                            if st.button(
+                                "✖",
+                                key=(
+                                    f"cancelar_ausencia_futura_"
+                                    f"{ausencia_futura[0]}"
+                                ),
+                                help="Cancelar liberação da vaga"
+                            ):
+                                cursor.execute("""
+                                    DELETE FROM ausencias_futuras
+                                    WHERE id = ?
+                                """, (
+                                    ausencia_futura[0],
+                                ))
+                                conn.commit()
+                                st.rerun()
+
+        # =========================
+        # MAPA DE VAGAS PARA REPOSIÇÃO
+        # =========================
+        with col_mapa_vagas:
+            with st.expander(
+                "🔎 Mapa de vagas para reposição",
+                expanded=False
+            ):
+                st.caption(
+                    "Mostra vagas normais + vagas liberadas por ausências "
+                    "futuras, descontando reposições já agendadas."
+                )
+
+                horizonte_vagas = st.selectbox(
+                    "Mostrar próximos",
+                    [7, 14, 30],
+                    index=1,
+                    format_func=lambda x: f"{x} dias",
+                    key="horizonte_mapa_vagas"
+                )
+
+                inicio_mapa_vagas = date.today()
+                fim_mapa_vagas = (
+                    inicio_mapa_vagas
+                    + timedelta(days=horizonte_vagas - 1)
+                )
+
+                cursor.execute("""
+                    SELECT
+                        t.id,
+                        t.dias,
+                        t.horario,
+                        t.instrutor,
+                        COALESCE(t.limite_alunos, 4),
+                        COUNT(a.id) AS total_fixos
+                    FROM turmas t
+                    LEFT JOIN alunos a
+                        ON a.turma_id = t.id
+                    GROUP BY
+                        t.id,
+                        t.dias,
+                        t.horario,
+                        t.instrutor,
+                        t.limite_alunos
+                    ORDER BY t.horario
+                """)
+
+                turmas_mapa_vagas = cursor.fetchall()
+
+                cursor.execute("""
+                    SELECT
+                        turma_id,
+                        data,
+                        COUNT(*)
+                    FROM ausencias_futuras
+                    WHERE data BETWEEN ? AND ?
+                    GROUP BY turma_id, data
+                """, (
+                    str(inicio_mapa_vagas),
+                    str(fim_mapa_vagas)
+                ))
+
+                ausencias_por_turma_data = {
+                    (r[0], str(r[1])[:10]): (r[2] or 0)
+                    for r in cursor.fetchall()
+                }
+
+                # Trancamentos ativos também liberam a vaga
+                # temporariamente para reposições.
+                cursor.execute("""
+                    SELECT
+                        aluno_id,
+                        turma_id,
+                        data_inicio,
+                        data_fim_prevista
+                    FROM trancamentos_matricula
+                    WHERE status = 'Ativo'
+                    AND data_inicio <= ?
+                    AND (
+                        data_fim_prevista IS NULL
+                        OR data_fim_prevista >= ?
+                    )
+                """, (
+                    str(fim_mapa_vagas),
+                    str(inicio_mapa_vagas)
+                ))
+
+                trancamentos_mapa_vagas = cursor.fetchall()
+
+                cursor.execute("""
+                    SELECT
+                        turma_reposicao_id,
+                        data_reposicao,
+                        COUNT(*)
+                    FROM reposicoes
+                    WHERE status = 'Agendada'
+                    AND data_reposicao BETWEEN ? AND ?
+                    AND turma_reposicao_id IS NOT NULL
+                    GROUP BY turma_reposicao_id, data_reposicao
+                """, (
+                    str(inicio_mapa_vagas),
+                    str(fim_mapa_vagas)
+                ))
+
+                reposicoes_por_turma_data = {
+                    (r[0], str(r[1])[:10]): (r[2] or 0)
+                    for r in cursor.fetchall()
+                }
+
+                cursor.execute("""
+                    SELECT data
+                    FROM dias_sem_aula
+                    WHERE data BETWEEN ? AND ?
+                """, (
+                    str(inicio_mapa_vagas),
+                    str(fim_mapa_vagas)
+                ))
+
+                dias_sem_aula_mapa = {
+                    str(r[0])[:10]
+                    for r in cursor.fetchall()
+                }
+
+                disponibilidade_por_data = {}
+                total_encaixes_disponiveis = 0
+
+                data_mapa = inicio_mapa_vagas
+
+                while data_mapa <= fim_mapa_vagas:
+                    chave_data = str(data_mapa)
+
+                    if chave_data not in dias_sem_aula_mapa:
+                        vagas_do_dia = []
+
+                        for turma_mapa in turmas_mapa_vagas:
+                            if (
+                                data_mapa.weekday()
+                                not in obter_dias_semana(
+                                    turma_mapa[1]
+                                )
+                            ):
+                                continue
+
+                            turma_id_mapa = turma_mapa[0]
+                            limite_mapa = int(turma_mapa[4] or 4)
+                            fixos_mapa = int(turma_mapa[5] or 0)
+
+                            liberadas_mapa = int(
+                                ausencias_por_turma_data.get(
+                                    (turma_id_mapa, chave_data),
+                                    0
+                                )
+                            )
+
+                            alunos_trancados_data = set()
+
+                            for trancamento_mapa in (
+                                trancamentos_mapa_vagas
+                            ):
+                                if trancamento_mapa[1] != turma_id_mapa:
+                                    continue
+
+                                inicio_trancamento_mapa = (
+                                    trancamento_mapa[2]
+                                )
+                                fim_trancamento_mapa = (
+                                    trancamento_mapa[3]
+                                )
+
+                                if (
+                                    data_mapa >= inicio_trancamento_mapa
+                                    and (
+                                        fim_trancamento_mapa is None
+                                        or data_mapa <= fim_trancamento_mapa
+                                    )
+                                ):
+                                    alunos_trancados_data.add(
+                                        trancamento_mapa[0]
+                                    )
+
+                            liberadas_mapa += len(
+                                alunos_trancados_data
+                            )
+
+                            repos_agendadas_mapa = int(
+                                reposicoes_por_turma_data.get(
+                                    (turma_id_mapa, chave_data),
+                                    0
+                                )
+                            )
+
+                            fixos_presentes_estimados = max(
+                                fixos_mapa - liberadas_mapa,
+                                0
+                            )
+
+                            ocupacao_estimada = (
+                                fixos_presentes_estimados
+                                + repos_agendadas_mapa
+                            )
+
+                            vagas_disponiveis_mapa = max(
+                                limite_mapa - ocupacao_estimada,
+                                0
+                            )
+
+                            if vagas_disponiveis_mapa > 0:
+                                vagas_do_dia.append(
+                                    (
+                                        turma_mapa,
+                                        vagas_disponiveis_mapa,
+                                        liberadas_mapa,
+                                        repos_agendadas_mapa
+                                    )
+                                )
+                                total_encaixes_disponiveis += (
+                                    vagas_disponiveis_mapa
+                                )
+
+                        if vagas_do_dia:
+                            disponibilidade_por_data[
+                                data_mapa
+                            ] = vagas_do_dia
+
+                    data_mapa += timedelta(days=1)
+
+                st.metric(
+                    "🪑 Encaixes disponíveis no período",
+                    total_encaixes_disponiveis
+                )
+
+                if len(disponibilidade_por_data) == 0:
+                    st.info(
+                        "Nenhuma vaga disponível nesse período."
+                    )
+                else:
+                    nomes_semana_mapa = [
+                        "Seg", "Ter", "Qua", "Qui",
+                        "Sex", "Sáb", "Dom"
+                    ]
+
+                    for data_disp, vagas_data in disponibilidade_por_data.items():
+                        with st.expander(
+                            (
+                                f"{nomes_semana_mapa[data_disp.weekday()]} "
+                                f"{data_disp.strftime('%d/%m')} • "
+                                f"{sum(v[1] for v in vagas_data)} vaga(s)"
+                            ),
+                            expanded=False
+                        ):
+                            for (
+                                turma_disp,
+                                vagas_disp,
+                                liberadas_disp,
+                                repos_disp
+                            ) in vagas_data:
+                                motivo_vaga = []
+
+                                vagas_fixadas = max(
+                                    int(turma_disp[4] or 4)
+                                    - int(turma_disp[5] or 0),
+                                    0
+                                )
+
+                                if vagas_fixadas > 0:
+                                    motivo_vaga.append(
+                                        f"{vagas_fixadas} vaga(s) fixa(s)"
+                                    )
+
+                                if liberadas_disp > 0:
+                                    motivo_vaga.append(
+                                        f"{liberadas_disp} liberada(s)"
+                                    )
+
+                                if repos_disp > 0:
+                                    motivo_vaga.append(
+                                        f"{repos_disp} reposição(ões) já agendada(s)"
+                                    )
+
+                                st.write(
+                                    f"**{turma_disp[2]}** | "
+                                    f"{turma_disp[1]} | "
+                                    f"**{vagas_disp} vaga(s)**"
+                                )
+
+                                if motivo_vaga:
+                                    st.caption(
+                                        " • ".join(motivo_vaga)
+                                    )
+
+
+        # =========================
         # SINCRONIZA AUSÊNCIAS JUSTIFICADAS
         # SEM REGISTRO DE REPOSIÇÃO
         # =========================
@@ -5538,12 +6535,22 @@ elif menu == "✅ Presenças":
         # Turmas disponíveis para editar agendamentos
         cursor.execute("""
             SELECT
-                id,
-                dias,
-                horario,
-                instrutor
-            FROM turmas
-            ORDER BY dias, horario
+                t.id,
+                t.dias,
+                t.horario,
+                t.instrutor,
+                COALESCE(t.limite_alunos, 4),
+                COUNT(a.id) AS total_fixos
+            FROM turmas t
+            LEFT JOIN alunos a
+                ON a.turma_id = t.id
+            GROUP BY
+                t.id,
+                t.dias,
+                t.horario,
+                t.instrutor,
+                t.limite_alunos
+            ORDER BY t.dias, t.horario
         """)
 
         turmas_edicao_reposicao = cursor.fetchall()
@@ -5796,24 +6803,121 @@ elif menu == "✅ Presenças":
                                     ]
                                 )
 
-                                turmas_agendamento_direto = [
-                                    turma
-                                    for turma
-                                    in turmas_edicao_reposicao
+                                # Calcula a disponibilidade real da data:
+                                # vagas fixas + faltas futuras - reposições já agendadas.
+                                cursor.execute("""
+                                    SELECT
+                                        turma_id,
+                                        COUNT(*)
+                                    FROM ausencias_futuras
+                                    WHERE data = ?
+                                    GROUP BY turma_id
+                                """, (
+                                    str(data_agendamento_direto),
+                                ))
+
+                                ausencias_data_agendamento = {
+                                    r[0]: (r[1] or 0)
+                                    for r in cursor.fetchall()
+                                }
+
+                                cursor.execute("""
+                                    SELECT
+                                        turma_id,
+                                        COUNT(DISTINCT aluno_id)
+                                    FROM trancamentos_matricula
+                                    WHERE status = 'Ativo'
+                                    AND ? BETWEEN
+                                        data_inicio
+                                        AND COALESCE(
+                                            data_fim_prevista,
+                                            DATE '9999-12-31'
+                                        )
+                                    GROUP BY turma_id
+                                """, (
+                                    str(data_agendamento_direto),
+                                ))
+
+                                trancados_data_agendamento = {
+                                    r[0]: (r[1] or 0)
+                                    for r in cursor.fetchall()
+                                }
+
+                                cursor.execute("""
+                                    SELECT
+                                        turma_reposicao_id,
+                                        COUNT(*)
+                                    FROM reposicoes
+                                    WHERE status = 'Agendada'
+                                    AND data_reposicao = ?
+                                    AND turma_reposicao_id IS NOT NULL
+                                    GROUP BY turma_reposicao_id
+                                """, (
+                                    str(data_agendamento_direto),
+                                ))
+
+                                reposicoes_data_agendamento = {
+                                    r[0]: (r[1] or 0)
+                                    for r in cursor.fetchall()
+                                }
+
+                                turmas_agendamento_direto = []
+
+                                for turma in turmas_edicao_reposicao:
                                     if (
                                         dia_semana_agendamento
-                                        in obter_dias_semana(
+                                        not in obter_dias_semana(
                                             turma[1]
                                         )
+                                    ):
+                                        continue
+
+                                    limite_turma = int(turma[4] or 4)
+                                    fixos_turma = int(turma[5] or 0)
+                                    liberadas_turma = int(
+                                        ausencias_data_agendamento.get(
+                                            turma[0],
+                                            0
+                                        )
                                     )
-                                ]
+
+                                    liberadas_turma += int(
+                                        trancados_data_agendamento.get(
+                                            turma[0],
+                                            0
+                                        )
+                                    )
+                                    repos_agendadas_turma = int(
+                                        reposicoes_data_agendamento.get(
+                                            turma[0],
+                                            0
+                                        )
+                                    )
+
+                                    ocupacao_turma = (
+                                        max(
+                                            fixos_turma - liberadas_turma,
+                                            0
+                                        )
+                                        + repos_agendadas_turma
+                                    )
+
+                                    vagas_turma = max(
+                                        limite_turma - ocupacao_turma,
+                                        0
+                                    )
+
+                                    if vagas_turma > 0:
+                                        turmas_agendamento_direto.append(
+                                            (turma, vagas_turma)
+                                        )
 
                                 if len(
                                     turmas_agendamento_direto
                                 ) == 0:
                                     st.warning(
-                                        f"Não há turmas cadastradas "
-                                        f"para {nome_dia_agendamento}."
+                                        f"Não há vagas disponíveis para "
+                                        f"{nome_dia_agendamento}."
                                     )
 
                                     turma_agendamento_id = None
@@ -5821,11 +6925,12 @@ elif menu == "✅ Presenças":
                                 else:
                                     opcoes_agendamento_direto = {
                                         (
-                                            f"{t[2]} | "
-                                            f"{t[1]} | "
-                                            f"Instrutor: {t[3]}"
-                                        ): t[0]
-                                        for t
+                                            f"{item[0][2]} | "
+                                            f"{item[0][1]} | "
+                                            f"{item[1]} vaga(s) | "
+                                            f"Instrutor: {item[0][3]}"
+                                        ): item[0][0]
+                                        for item
                                         in turmas_agendamento_direto
                                     }
 
