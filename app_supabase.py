@@ -7646,8 +7646,12 @@ elif menu == "✅ Presenças":
                 disponibilidade_por_data.items()
             )
 
-            # 3 quadros lado a lado.
-            colunas_mapa = st.columns(3)
+            st.caption(
+                "Visualização compacta: cada quadro mostra o total do dia e os horários com vaga."
+            )
+
+            # 4 quadros lado a lado para ficar mais compacto.
+            colunas_mapa = st.columns(4)
 
             for indice_data, (
                 data_disp,
@@ -7659,20 +7663,17 @@ elif menu == "✅ Presenças":
                     for v in vagas_data
                 )
 
-                with colunas_mapa[indice_data % 3]:
+                with colunas_mapa[indice_data % 4]:
                     with st.container(border=True):
                         st.markdown(
-                            f"### 📅 "
-                            f"{nomes_semana_mapa[data_disp.weekday()]} "
-                            f"{data_disp.strftime('%d/%m')}"
+                            f"**📅 {nomes_semana_mapa[data_disp.weekday()]} {data_disp.strftime('%d/%m')}**"
                         )
 
-                        st.metric(
-                            "Vagas disponíveis",
-                            total_vagas_data
+                        st.markdown(
+                            f"**Total:** {total_vagas_data} vaga(s)"
                         )
 
-                        st.divider()
+                        st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
 
                         for (
                             turma_disp,
@@ -7681,19 +7682,6 @@ elif menu == "✅ Presenças":
                             repos_disp,
                             antecipacoes_disp
                         ) in vagas_data:
-
-                            st.markdown(
-                                f"**🕐 {turma_disp[2]}**"
-                            )
-
-                            st.write(
-                                f"**{vagas_disp} vaga(s)**"
-                            )
-
-                            st.caption(
-                                f"{turma_disp[1]} • "
-                                f"{turma_disp[3]}"
-                            )
 
                             detalhes_vaga = []
 
@@ -7715,22 +7703,31 @@ elif menu == "✅ Presenças":
 
                             if repos_disp > 0:
                                 detalhes_vaga.append(
-                                    f"{repos_disp} reposição(ões)"
+                                    f"{repos_disp} rep."
                                 )
 
                             if antecipacoes_disp > 0:
                                 detalhes_vaga.append(
-                                    f"{antecipacoes_disp} antecipada(s)"
+                                    f"{antecipacoes_disp} ant."
                                 )
+
+                            linha_resumo = (
+                                f"**🕐 {turma_disp[2]}**  \
+"
+                                f"{vagas_disp} vaga(s) • {turma_disp[1]}  \
+"
+                                f"<span style='font-size: 0.80rem; color: #6b7280;'>{turma_disp[3]}</span>"
+                            )
+
+                            st.markdown(
+                                linha_resumo,
+                                unsafe_allow_html=True
+                            )
 
                             if detalhes_vaga:
                                 st.caption(
-                                    " • ".join(
-                                        detalhes_vaga
-                                    )
+                                    " • ".join(detalhes_vaga)
                                 )
-
-                            st.markdown("---")
 
 
         # =========================
