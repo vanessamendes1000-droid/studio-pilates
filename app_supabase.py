@@ -4598,6 +4598,7 @@ elif menu == "✅ Presenças":
             "✅ Fazer chamada",
             "📋 Histórico de presenças",
             "🔄 Reposições",
+            "📅 Ausência futura",
             "🔎 Mapa de vagas",
             "⏩ Adiantar aula"
         ],
@@ -6926,6 +6927,208 @@ elif menu == "✅ Presenças":
     # =========================
     # ADIANTAR AULA
     # =========================
+    # =========================
+    # AUSÊNCIA FUTURA
+    # =========================
+    elif secao_presencas == "📅 Ausência futura":
+        st.subheader("📅 Ausência futura")
+
+        st.caption(
+            "Registre quando um aluno avisar antecipadamente que não virá. "
+            "A vaga ficará disponível automaticamente no Mapa de vagas."
+        )
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ausencias_futuras
+            (
+                id SERIAL PRIMARY KEY,
+                aluno_id INTEGER NOT NULL,
+                turma_id INTEGER NOT NULL,
+                data DATE NOT NULL,
+                observacao TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (aluno_id, data)
+            )
+        """)
+
+        conn.commit()
+
+        col_nova_ausencia, col_ausencias_registradas = st.columns(2)
+
+        with col_nova_ausencia:
+            with st.container(border=True):
+                st.markdown("### ➕ Informar ausência")
+
+                cursor.execute("""
+                    SELECT
+                        a.id,
+                        a.nome,
+                        a.turma_id,
+                        t.dias,
+                        t.horario
+                    FROM alunos a
+                    INNER JOIN turmas t
+                        ON t.id = a.turma_id
+                    ORDER BY a.nome
+                """)
+
+                alunos_ausencia_futura = cursor.fetchall()
+
+                opcoes_ausencia_futura = {
+                    f"{a[1]} | {a[3]} - {a[4]}": a
+                    for a in alunos_ausencia_futura
+                }
+
+                if len(opcoes_ausencia_futura) == 0:
+                    st.info("Nenhum aluno com turma cadastrada.")
+                else:
+                    aluno_ausencia_label = st.selectbox(
+                        "Aluno",
+                        list(opcoes_ausencia_futura.keys()),
+                        index=None,
+                        placeholder="Selecione o aluno",
+                        key="aluno_ausencia_futura"
+                    )
+
+                    data_ausencia_futura = st.date_input(
+                        "Data em que não virá",
+                        value=date.today(),
+                        min_value=date.today(),
+                        key="data_ausencia_futura"
+                    )
+
+                    observacao_ausencia_futura = st.text_input(
+                        "Observação",
+                        placeholder="Opcional",
+                        key="observacao_ausencia_futura"
+                    )
+
+                    pode_salvar_ausencia = False
+                    dados_aluno_ausencia = None
+
+                    if aluno_ausencia_label:
+                        dados_aluno_ausencia = opcoes_ausencia_futura[
+                            aluno_ausencia_label
+                        ]
+
+                        if (
+                            data_ausencia_futura.weekday()
+                            in obter_dias_semana(
+                                dados_aluno_ausencia[3]
+                            )
+                        ):
+                            pode_salvar_ausencia = True
+                            st.success(
+                                f"✅ Turma: {dados_aluno_ausencia[3]} - "
+                                f"{dados_aluno_ausencia[4]}"
+                            )
+                        else:
+                            st.warning(
+                                "Essa data não corresponde aos dias "
+                                "da turma regular desse aluno."
+                            )
+
+                    if (
+                        pode_salvar_ausencia
+                        and st.button(
+                            "✅ Liberar vaga",
+                            key="salvar_ausencia_futura",
+                            use_container_width=True
+                        )
+                    ):
+                        cursor.execute("""
+                            INSERT INTO ausencias_futuras
+                            (
+                                aluno_id,
+                                turma_id,
+                                data,
+                                observacao
+                            )
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT (aluno_id, data)
+                            DO UPDATE SET
+                                turma_id = EXCLUDED.turma_id,
+                                observacao = EXCLUDED.observacao
+                        """, (
+                            dados_aluno_ausencia[0],
+                            dados_aluno_ausencia[2],
+                            str(data_ausencia_futura),
+                            observacao_ausencia_futura
+                        ))
+
+                        conn.commit()
+
+                        st.success(
+                            "✅ Ausência futura registrada. "
+                            "A vaga já está disponível no Mapa de vagas."
+                        )
+                        st.rerun()
+
+        with col_ausencias_registradas:
+            with st.container(border=True):
+                st.markdown("### 📋 Vagas já liberadas")
+
+                cursor.execute("""
+                    SELECT
+                        af.id,
+                        a.nome,
+                        af.data,
+                        t.dias,
+                        t.horario,
+                        af.observacao
+                    FROM ausencias_futuras af
+                    INNER JOIN alunos a
+                        ON a.id = af.aluno_id
+                    INNER JOIN turmas t
+                        ON t.id = af.turma_id
+                    WHERE af.data >= ?
+                    ORDER BY af.data, t.horario, a.nome
+                """, (
+                    str(date.today()),
+                ))
+
+                ausencias_futuras_registradas = cursor.fetchall()
+
+                if not ausencias_futuras_registradas:
+                    st.caption(
+                        "Nenhuma ausência futura registrada."
+                    )
+                else:
+                    for ausencia_futura in ausencias_futuras_registradas:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"**{ausencia_futura[1]}**"
+                            )
+
+                            st.caption(
+                                f"📅 {ausencia_futura[2].strftime('%d/%m/%Y')} "
+                                f"• 🕐 {ausencia_futura[4]} "
+                                f"• {ausencia_futura[3]}"
+                            )
+
+                            if ausencia_futura[5]:
+                                st.caption(
+                                    f"📝 {ausencia_futura[5]}"
+                                )
+
+                            if st.button(
+                                "Cancelar liberação da vaga",
+                                key=(
+                                    f"cancelar_ausencia_futura_"
+                                    f"{ausencia_futura[0]}"
+                                ),
+                                use_container_width=True
+                            ):
+                                cursor.execute("""
+                                    DELETE FROM ausencias_futuras
+                                    WHERE id = ?
+                                """, (
+                                    ausencia_futura[0],
+                                ))
+
+                                conn.commit()
+                                st.rerun()
+
     elif secao_presencas == "⏩ Adiantar aula":
         st.subheader("⏩ Adiantar aula")
 
