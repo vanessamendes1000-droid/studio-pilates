@@ -170,8 +170,6 @@ cursor.execute("""
     AND data_fim_prevista < CURRENT_DATE
 """)
 
-conn.commit()
-
 
 # =========================
 # ANTECIPAÇÕES DE AULA
@@ -191,7 +189,6 @@ cursor.execute("""
     )
 """)
 
-conn.commit()
 
 st.set_page_config(
     page_title="Studio de Pilates",
@@ -6951,8 +6948,6 @@ elif menu == "✅ Presenças":
             )
         """)
 
-        conn.commit()
-
         col_nova_ausencia, col_ausencias_registradas = st.columns(2)
 
         with col_nova_ausencia:
@@ -7056,8 +7051,6 @@ elif menu == "✅ Presenças":
                             observacao_ausencia_futura
                         ))
 
-                        conn.commit()
-
                         st.success(
                             "✅ Ausência futura registrada. "
                             "A vaga já está disponível no Mapa de vagas."
@@ -7126,7 +7119,6 @@ elif menu == "✅ Presenças":
                                     ausencia_futura[0],
                                 ))
 
-                                conn.commit()
                                 st.rerun()
 
     elif secao_presencas == "⏩ Adiantar aula":
@@ -7457,7 +7449,6 @@ elif menu == "✅ Presenças":
                             observacao_antecipacao
                         ))
 
-                        conn.commit()
                         st.success(
                             "✅ Aula antecipada agendada."
                         )
@@ -7530,7 +7521,6 @@ elif menu == "✅ Presenças":
                                     antecipacao[0],
                                 ))
 
-                                conn.commit()
                                 st.rerun()
 
     # =========================
